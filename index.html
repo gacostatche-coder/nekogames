@@ -495,7 +495,7 @@ var APP_MODE = "store", APP_STORE = "dragon-rojo", STORE_URL = "";
    En la versión real esto vive en Firebase (Firestore + Auth).
    ========================================================= */
 
-var STORAGE_KEY = "tcg-pres-tienda-v6";
+var STORAGE_KEY = "nekogames-v2"; 
 var memoryStore = null;
 
 /* ---------- Catálogo de ejemplo (en real: Scryfall + MTGJSON) ----------
@@ -3508,7 +3508,7 @@ function auditWrap(kind, name, fn) {
 }
 [["act", ACT], ["submit", SUBMIT], ["change", CHANGE]].forEach(function (pair) { Object.keys(pair[1]).forEach(function (k) { pair[1][k] = auditWrap(pair[0], k, pair[1][k]); }); });
 /* Algunos registros de ejemplo para la demo */
-if (!db.audit.length) {
+if (!db.audit.length && !db.blankDone) {
   var ex = [[6, "Inventario", "Agregó al inventario 4 × Esper Sentinel (MH2 #12) · Normal · NM"], [5, "Carga masiva", "Cargó archivo de cartas «inventario_octubre.csv»: 46 partidas agregadas"], [4, "Pedidos", "Registró pago de $718.20 en el pedido #1002 (Transferencia · ref. 88213)"], [3, "Apariencia", "Cambió la paleta de colores a «Gato verde noche»"], [2, "Productos", "Creó el producto «Playmat 60 × 35 cm · arte de la tienda»"], [1, "Precios", "Tipo de cambio: manual · $17.20 → $17.50"], [0.2, "Pedidos", "Registró pago de $50.00 en el pedido #1003 (Transferencia · ref. 90321) · Anticipo"]];
   ex.forEach(function (e) { var st = storeById("store-dr"); db.audit.push({ id: uid("au"), storeId: "store-dr", at: daysAgo(e[0]), cat: e[1], text: e[2], user: (st && st.adminEmail) || "Administrador" }); });
   db.audit.sort(function (a, b) { return b.at - a.at; });
@@ -3719,9 +3719,11 @@ document.addEventListener("keydown", function (e) { if (e.key === "Escape" && ui
 document.addEventListener("error", function (e) { var t = e.target; if (t && t.tagName === "IMG" && t.dataset.card) t.remove(); }, true);
 
 window.addEventListener("hashchange", function () { applyRoute(); });
+if (!db.blankDone) { (function () { var s = db.stores.filter(function (x) { return x.id === "store-dr"; })[0] || db.stores[0]; db.stores = [s]; ["inventory","products","orders","events","payments","internal","promos","clients","tabs","clientPays","audit"].forEach(function (k) { db[k] = []; }); db.carts = {}; db.wishlists = {}; db.wishMeta = {}; db.buyerInfo = {}; db.buyer = null; db.wishSeeded = true; s.categories = []; s.nextOrder = 1001; s.theme.slides = []; s.adminEmail = ""; s.info.address = ""; s.info.whatsapp = ""; s.info.hours = ""; db.blankDone = true; })(); }
 saveDB();
 applyRoute();
 checkScryfall();
+window.addEventListener("storage", function (e) { if (e.key !== STORAGE_KEY || !e.newValue) return; var d = loadDB(); if (!d) return; db = d; try { migrateR7(); } catch (x) {} var m = ui.modal; render(); });
 </script>
 
 </body>
