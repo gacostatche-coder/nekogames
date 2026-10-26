@@ -495,7 +495,7 @@ var APP_MODE = "panel", APP_STORE = "dragon-rojo", STORE_URL = "./";
    En la versión real esto vive en Firebase (Firestore + Auth).
    ========================================================= */
 
-var STORAGE_KEY = "nekogames-v2"; 
+var STORAGE_KEY = "nekogames-fb1"; 
 var memoryStore = null;
 
 /* ---------- Catálogo de ejemplo (en real: Scryfall + MTGJSON) ----------
@@ -1151,7 +1151,7 @@ function viewStore() {
     '<form class="search" data-submit="storeSearch" role="search">' + ICON.search + '<label class="sr" for="s-q">Buscar cartas</label><input id="s-q" type="search" placeholder="Busca una carta o set…" value="' + esc(ui.filters.q) + '" data-input="storeQ" autocomplete="off"></form>' +
     '<div class="row" style="gap:8px">' +
     (buyer ? '<button type="button" class="sbtn" data-act="openProfile" aria-label="Mi perfil">' + avatarHTML(buyer, 28) + esc(buyer.name.split(" ")[0]) + "</button>"
-           : '<button type="button" class="sbtn" data-act="loginBuyer">' + ICON.user + "Entrar</button>") +
+           : '<button type="button" class="sbtn" data-act="loginBuyer">' + ICON.user + "Entrar con Google</button>") +
     '<button type="button" class="sbtn acc" data-act="storeTab" data-tab="cart">' + ICON.cart + 'Carrito <span class="mono">' + cartCount(s.id) + "</span></button></div></div>" +
     '<nav class="tabs" aria-label="Secciones">' + t("home", "Inicio") + t("catalog", "Cartas sueltas") + t("products", "Otros productos") + t("wishlist", "Mi wishlist") + t("orders", "Mis pedidos") + t("events", "Eventos") + "</nav></div></header>" +
     '<main class="wrap gut">' + body + "</main>" +
@@ -1325,7 +1325,7 @@ function storeCart(s) {
   return '<section class="stack"><h2>Tu carrito</h2><div class="panel">' + rows +
     '<form class="stack" data-submit="checkout" style="margin-top:18px"><label class="flabel" for="ck-note">Nota para la tienda (opcional)<textarea id="ck-note" class="sel" style="min-height:72px;padding:10px" placeholder="Ej. paso por ellas el sábado"></textarea></label>' +
     '<div class="row" style="justify-content:space-between"><div><span class="muted">Total</span><div class="price" style="font-size:28px">' + money(total) + "</div></div>" +
-    '<button type="submit" class="sbtn acc">' + (db.buyer ? "Hacer pedido" : "Entrar y hacer pedido") + "</button></div>" +
+    '<button type="submit" class="sbtn acc">' + (db.buyer ? "Hacer pedido" : "Entrar con Google y hacer pedido") + "</button></div>" +
     '<p class="muted" style="margin:0;font-size:13px">Al hacer el pedido apartamos tus productos ' + (s.info.holdHours || 48) + ' horas y te mostramos cómo pagar. Envía tu comprobante en ese plazo para que no vuelvan a la venta.</p></form></div></section>';
 }
 function storeConfirm(s) {
@@ -3728,9 +3728,333 @@ document.addEventListener("error", function (e) { var t = e.target; if (t && t.t
 window.addEventListener("hashchange", function () { applyRoute(); });
 db.stores.forEach(function (x) { if (x.pricing.fxMode !== "manual") { x.pricing.fxMode = "manual"; x.pricing.fx = x.pricing.manualFx || x.pricing.fx; } });
 if (!db.blankDone) { (function () { var s = db.stores.filter(function (x) { return x.id === "store-dr"; })[0] || db.stores[0]; db.stores = [s]; ["inventory","products","orders","events","payments","internal","promos","clients","tabs","clientPays","audit"].forEach(function (k) { db[k] = []; }); db.carts = {}; db.wishlists = {}; db.wishMeta = {}; db.buyerInfo = {}; db.buyer = null; db.wishSeeded = true; s.categories = []; s.nextOrder = 1001; s.theme.slides = []; s.adminEmail = ""; s.info.address = ""; s.info.whatsapp = ""; s.info.hours = ""; db.blankDone = true; })(); }
+/* ===== Firebase: acceso con Google y datos compartidos entre todos los dispositivos ===== */
+var FB_CONFIG = {
+  apiKey: "AIzaSyDH1YWbXDp03cXNqpMNHcaDtnN7LJ3Mu9U",
+  authDomain: "plataforma-tcg-821c5.firebaseapp.com",
+  projectId: "plataforma-tcg-821c5",
+  storageBucket: "plataforma-tcg-821c5.firebasestorage.app",
+  messagingSenderId: "412449412802",
+  appId: "1:412449412802:web:b8c5d83ec404481585cd5b"
+};
+var FB_SLUG = "neko-games", FB_SDK = "https://www.gstatic.com/firebasejs/10.14.1/", FB_CART = "nekogames-carrito";
+var FB = { user: null, admin: false, admins: [], pubOK: false, privOK: false, ordOK: false, meOK: false, lastPub: null, lastPriv: null, lastOrd: {}, lastMe: null, cliDocs: {}, then: null, timer: null, meCreated: null };
+var fdb = null, fauth = null;
+var G_ICON = '<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>';
+
+(function () {
+  var st = document.createElement("style");
+  st.textContent = ".fb-ov{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(10,14,13,.72)}" +
+    ".fb-ov.fb-full{background:#263330}" +
+    ".fb-card{width:100%;max-width:400px;background:#1C2623;color:#F3F1EA;border:1px solid #3A4A45;border-radius:18px;padding:28px 24px;display:flex;flex-direction:column;gap:14px;text-align:center;font-family:inherit;box-shadow:0 20px 60px rgba(0,0,0,.4)}" +
+    ".fb-card h2{margin:0;font-size:22px;line-height:1.2}.fb-card p{margin:0;color:#C9CFC9;font-size:15px;line-height:1.45}" +
+    ".fb-logo{width:84px;height:84px;border-radius:50%;object-fit:cover;align-self:center;background:#F3F1EA}" +
+    ".fb-btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:48px;border-radius:12px;border:0;background:#F59821;color:#1C2623;font-weight:700;font-size:16px;cursor:pointer;font-family:inherit}" +
+    ".fb-btn.g{background:#fff;color:#1F1F1F;border:1px solid #DADCE0}" +
+    ".fb-link{background:none;border:0;color:#C9CFC9;text-decoration:underline;cursor:pointer;font-size:14px;font-family:inherit;min-height:40px}" +
+    ".fb-in{width:100%;min-height:48px;border-radius:12px;border:1px solid #3A4A45;background:#263330;color:#F3F1EA;padding:0 14px;font-size:16px;font-family:inherit;box-sizing:border-box}" +
+    ".fb-spin{width:28px;height:28px;border-radius:50%;border:3px solid #3A4A45;border-top-color:#F59821;align-self:center;animation:fbspin .8s linear infinite}@keyframes fbspin{to{transform:rotate(360deg)}}";
+  document.head.appendChild(st);
+})();
+
+function fbStore() { return db.stores[0]; }
+function fbRefs() {
+  var t = fdb.collection("tiendas").doc(FB_SLUG);
+  return { pub: t, priv: t.collection("privado").doc("datos"), acc: t.collection("acceso").doc("admins"), cnt: t.collection("contador").doc("pedidos"), ped: t.collection("pedidos"), cli: t.collection("clientes") };
+}
+function fbErr(e) {
+  try { console.warn("[firebase]", e && (e.code || e.message) || e); } catch (x) {}
+  if (e && e.code === "permission-denied") toast("No se pudo guardar: falta permiso en la base de datos.");
+}
+function fbLogoHTML() { var s = fbStore(), l = s && s.theme && s.theme.logo; return l ? '<img class="fb-logo" src="' + esc(l) + '" alt="">' : ""; }
+
+/* ---- Datos que se guardan en la nube ---- */
+function fbPubData() {
+  var s = fbStore(), used = {};
+  (db.inventory || []).forEach(function (i) { used[i.printId] = 1; });
+  Object.keys(db.wishlists || {}).forEach(function (k) { ((db.wishlists[k] || {})[s.id] || []).forEach(function (id) { if (String(id).indexOf("p:") !== 0) used[id] = 1; }); });
+  var cat = {}; Object.keys(used).forEach(function (id) { if (db.catalog[id]) cat[id] = db.catalog[id]; });
+  return { store: s, inventory: db.inventory || [], products: db.products || [], events: db.events || [], catalog: cat };
+}
+function fbPrivData() { return { clients: db.clients || [], tabs: db.tabs || [], clientPays: db.clientPays || [], audit: (db.audit || []).slice(0, 500), internal: db.internal || [], promos: db.promos || [] }; }
+function fbMeData() {
+  var b = db.buyer || {}, s = fbStore(), k = FB.user.uid;
+  return { name: b.name || "", email: (FB.user.email || "").toLowerCase(), phone: b.phone || "", photo: b.avatar || "", wishlist: ((db.wishlists[k] || {})[s.id]) || [], wishMeta: (((db.wishMeta || {})[k] || {})[s.id]) || {}, createdAt: FB.meCreated || Date.now() };
+}
+function fbApplyPub(d) {
+  if (!d || !d.store) return;
+  db.stores = [d.store]; db.inventory = d.inventory || []; db.products = d.products || []; db.events = d.events || [];
+  Object.keys(d.catalog || {}).forEach(function (id) { db.catalog[id] = d.catalog[id]; });
+  ui.storeId = d.store.id;
+}
+
+/* Guardado: el navegador solo guarda el carrito; lo demás va a la nube. */
+_saveDBraw = function () {
+  try { localStorage.setItem(FB_CART, JSON.stringify(db.carts || {})); } catch (e) {}
+  clearTimeout(FB.timer); FB.timer = setTimeout(fbFlush, 350);
+  return true;
+};
+function fbFlush() {
+  if (!fdb || !FB.user) return;
+  var r = fbRefs(), now = Date.now();
+  if (FB.admin) {
+    if (!FB.pubOK || !FB.privOK) return;
+    var pj = JSON.stringify(fbPubData()); if (pj !== FB.lastPub) { FB.lastPub = pj; r.pub.set({ json: pj, at: now }).catch(fbErr); }
+    var vj = JSON.stringify(fbPrivData()); if (vj !== FB.lastPriv) { FB.lastPriv = vj; r.priv.set({ json: vj, at: now }).catch(fbErr); }
+    if (FB.ordOK) {
+      var seen = {};
+      db.orders.forEach(function (o) {
+        seen[o.id] = 1; var j = JSON.stringify(o);
+        if (FB.lastOrd[o.id] !== j) { FB.lastOrd[o.id] = j; r.ped.doc(o.id).set({ uid: (o.buyer && o.buyer.id) || "", json: j, at: now }).catch(fbErr); }
+      });
+      Object.keys(FB.lastOrd).forEach(function (id) { if (!seen[id]) { delete FB.lastOrd[id]; r.ped.doc(id).delete().catch(fbErr); } });
+    }
+  } else if (FB.meOK) {
+    var mj = JSON.stringify(fbMeData());
+    if (mj !== FB.lastMe) { FB.lastMe = mj; r.cli.doc(FB.user.uid).set({ uid: FB.user.uid, email: (FB.user.email || "").toLowerCase(), json: mj, at: now }).catch(fbErr); }
+  }
+}
+
+/* ---- Panel: solo cuentas autorizadas ---- */
+function fbGate(state, msg) {
+  var el = document.getElementById("fb-gate");
+  if (!state) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement("div"); el.id = "fb-gate"; el.className = "fb-ov fb-full"; document.body.appendChild(el); }
+  var name = esc(fbStore().name), h;
+  if (state === "checking") h = fbLogoHTML() + '<h2>Panel de ' + name + '</h2><div class="fb-spin" aria-label="Cargando"></div><p>Verificando tu acceso…</p>';
+  else if (state === "login") h = fbLogoHTML() + '<h2>Panel de ' + name + '</h2><p>Entra con la cuenta de Google autorizada para administrar la tienda.</p><button type="button" class="fb-btn g" id="fb-g">' + G_ICON + 'Entrar con Google</button>';
+  else if (state === "denied") h = fbLogoHTML() + '<h2>No tienes acceso</h2><p>La cuenta <strong>' + esc(FB.user ? FB.user.email : "") + '</strong> no está autorizada para este panel. Pide al dueño de la tienda que la agregue.</p><button type="button" class="fb-btn g" id="fb-other">' + G_ICON + 'Usar otra cuenta</button>';
+  else h = fbLogoHTML() + '<h2>No pudimos conectar</h2><p>' + esc(msg || "Revisa tu conexión a internet y recarga la página.") + '</p><button type="button" class="fb-btn" id="fb-reload">Recargar</button>';
+  el.innerHTML = '<div class="fb-card" role="dialog" aria-modal="true">' + h + "</div>";
+  var g = document.getElementById("fb-g"); if (g) g.onclick = fbSignIn;
+  var o = document.getElementById("fb-other"); if (o) o.onclick = function () { fauth.signOut().then(fbSignIn); };
+  var rl = document.getElementById("fb-reload"); if (rl) rl.onclick = function () { location.reload(); };
+}
+function fbCheckAdmin(u) {
+  var r = fbRefs(); fbGate("checking");
+  r.acc.get().then(function (snap) {
+    FB.admins = snap.exists ? (snap.data().emails || []) : [];
+    if (FB.admins.indexOf(u.email) >= 0) fbAdminOK(); else fbGate("denied");
+  }, function () {
+    /* Sin permiso de lectura: o no es administrador, o la tienda aún no tiene dueño. El primero en entrar queda como dueño. */
+    r.acc.set({ emails: [u.email] }).then(function () { FB.admins = [u.email]; fbAdminOK(); toast("Listo: tu cuenta quedó como administradora de la tienda"); }, function () { fbGate("denied"); });
+  });
+}
+function fbAdminOK() {
+  FB.admin = true; fbGate(null);
+  var r = fbRefs();
+  r.pub.onSnapshot(function (snap) {
+    if (!snap.exists) { FB.pubOK = true; fbFlush(); return; }
+    var j = snap.data().json; if (FB.pubOK && j === FB.lastPub) return;
+    FB.lastPub = j; fbApplyPub(JSON.parse(j)); FB.pubOK = true; fbApplyStock(); render();
+  }, fbErr);
+  r.priv.onSnapshot(function (snap) {
+    if (!snap.exists) { FB.privOK = true; fbMergeAllClients(); fbFlush(); return; }
+    var j = snap.data().json; if (FB.privOK && j === FB.lastPriv) return;
+    FB.lastPriv = j; var d = JSON.parse(j);
+    db.clients = d.clients || []; db.tabs = d.tabs || []; db.clientPays = d.clientPays || []; db.audit = d.audit || []; db.internal = d.internal || []; db.promos = d.promos || [];
+    FB.privOK = true; if (fbMergeAllClients()) saveDB(); render();
+  }, fbErr);
+  r.ped.onSnapshot(function (qs) {
+    var list = []; qs.forEach(function (d) { var x = d.data(); FB.lastOrd[d.id] = x.json; list.push(JSON.parse(x.json)); });
+    db.orders = list; FB.ordOK = true; fbApplyStock(); render();
+  }, fbErr);
+  r.cli.onSnapshot(function (qs) {
+    qs.forEach(function (d) { FB.cliDocs[d.id] = JSON.parse(d.data().json); });
+    if (fbMergeAllClients()) saveDB(); render();
+  }, fbErr);
+  render();
+}
+/* Los pedidos nuevos descuentan inventario cuando el panel los recibe. */
+function fbApplyStock() {
+  if (!FB.pubOK || !FB.ordOK) return;
+  var ch = false;
+  db.orders.forEach(function (o) {
+    if (o.stockApplied) return; o.stockApplied = true; ch = true;
+    (o.items || []).forEach(function (i) {
+      if (i.prodId) { var p = db.products.filter(function (x) { return x.id === i.prodId; })[0]; if (p) p.qty = Math.max(0, Number(p.qty) - i.qty); }
+      else { var it = db.inventory.filter(function (x) { return x.id === i.invId; })[0]; if (it) it.qty = Math.max(0, Number(it.qty) - i.qty); }
+    });
+  });
+  if (ch) saveDB();
+}
+/* Cada cuenta de Google se vuelve cliente de la tienda; si ya existía con ese correo, se une a su ficha. */
+function fbMergeAllClients() {
+  var s = fbStore(), ch = false;
+  db.wishMeta = db.wishMeta || {}; db.buyerInfo = db.buyerInfo || {};
+  Object.keys(FB.cliDocs).forEach(function (uid) {
+    var d = FB.cliDocs[uid], em = (d.email || "").toLowerCase();
+    db.wishlists[uid] = {}; db.wishlists[uid][s.id] = d.wishlist || [];
+    db.wishMeta[uid] = {}; db.wishMeta[uid][s.id] = d.wishMeta || {};
+    db.buyerInfo[uid] = { name: d.name, email: em, phone: d.phone };
+    if (!FB.privOK || (FB.admins || []).map(function (x) { return x.toLowerCase(); }).indexOf(em) >= 0) return;
+    var c = db.clients.filter(function (x) { return x.storeId === s.id && (x.buyerId === uid || (em && (x.email || "").toLowerCase() === em)); })[0];
+    if (!c) { db.clients.push({ id: "cl-" + uid.slice(0, 12), storeId: s.id, name: d.name || em, phone: d.phone || "", email: em, buyerId: uid, source: "online", notes: "", createdAt: d.createdAt || Date.now() }); ch = true; return; }
+    if (c.buyerId !== uid) { c.buyerId = uid; ch = true; }
+    if (!c.phone && d.phone) { c.phone = d.phone; ch = true; }
+    if (!c.email && em) { c.email = em; ch = true; }
+  });
+  return ch;
+}
+function fbAccessCard() {
+  var me = FB.user ? FB.user.email : "";
+  var list = (FB.admins || []).map(function (e) {
+    return '<li class="row" style="justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px"><span>' + esc(e) + (e === me ? ' <span class="pill">Tú</span>' : "") + "</span>" +
+      (e !== me ? '<button type="button" class="btn sm" data-act="fbDelAdmin" data-e="' + esc(e) + '">Quitar</button>' : "") + "</li>";
+  }).join("");
+  return '<div class="card stack" style="margin-bottom:16px"><h2 style="font-size:18px">Acceso al panel</h2>' +
+    '<p class="muted" style="margin:0">Solo estas cuentas de Google pueden entrar al panel de la tienda.</p>' +
+    '<ul class="stack" style="list-style:none;margin:0;padding:0;gap:8px">' + list + "</ul>" +
+    '<div class="row" style="gap:8px;align-items:flex-end"><label class="field" for="fb-new-admin" style="flex:1 1 240px">Agregar cuenta de Google<input id="fb-new-admin" type="email" placeholder="correo@gmail.com" autocomplete="off"></label><button type="button" class="btn" data-act="fbAddAdmin">Agregar</button></div>' +
+    '<div class="row" style="justify-content:space-between;gap:8px"><span class="muted" style="font-size:13px">Sesión iniciada: ' + esc(me) + '</span><button type="button" class="btn sm" data-act="fbLogout">Cerrar sesión</button></div></div>';
+}
+if (APP_MODE === "panel") {
+  var _fbAdmInfo = admInfo;
+  admInfo = function (s) { return fbAccessCard() + _fbAdmInfo(s); };
+}
+Object.assign(ACT, {
+  fbAddAdmin: function () {
+    var inp = document.getElementById("fb-new-admin"), e = (inp.value || "").trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { toast("Escribe un correo válido"); return; }
+    if (FB.admins.indexOf(e) >= 0) { toast("Esa cuenta ya tiene acceso"); return; }
+    fbRefs().acc.update({ emails: firebase.firestore.FieldValue.arrayUnion(e) }).then(function () { FB.admins.push(e); render(); toast("Acceso agregado: " + e); }, function (x) { fbErr(x); toast("No se pudo agregar el acceso"); });
+  },
+  fbDelAdmin: function (el) {
+    var e = el.dataset.e;
+    fbRefs().acc.update({ emails: firebase.firestore.FieldValue.arrayRemove(e) }).then(function () { FB.admins = FB.admins.filter(function (x) { return x !== e; }); render(); toast("Acceso quitado: " + e); }, function (x) { fbErr(x); toast("No se pudo quitar el acceso"); });
+  },
+  fbLogout: function () { fauth.signOut().then(function () { location.reload(); }); }
+});
+
+/* ---- Tienda: clientes con su cuenta de Google ---- */
+function fbSignIn() {
+  var p = new firebase.auth.GoogleAuthProvider();
+  p.setCustomParameters({ prompt: "select_account" });
+  fauth.signInWithPopup(p).catch(function (e) {
+    if (e && (e.code === "auth/popup-blocked" || e.code === "auth/operation-not-supported-in-this-environment")) return fauth.signInWithRedirect(p);
+    if (e && (e.code === "auth/popup-closed-by-user" || e.code === "auth/cancelled-popup-request")) { FB.then = null; return; }
+    if (e && e.code === "auth/unauthorized-domain") { toast("Este dominio no está autorizado en Firebase"); return; }
+    fbErr(e); toast("No se pudo entrar con Google. Inténtalo otra vez.");
+  });
+}
+function fbRunThen() {
+  var t = FB.then; FB.then = null; if (!t) return;
+  if (t.act === "wish") { var w = wishOf(curStore().id); if (w.indexOf(t.id) < 0) w.push(t.id); saveDB(); ui.modal = t.back || null; render(); }
+  else if (t.act === "checkout") placeOrder(t.note);
+}
+function fbAskPhone() {
+  if (document.getElementById("fb-phone")) return;
+  var el = document.createElement("div"); el.id = "fb-phone"; el.className = "fb-ov";
+  var first = esc(((db.buyer && db.buyer.name) || "").split(" ")[0]);
+  el.innerHTML = '<div class="fb-card" role="dialog" aria-modal="true" aria-labelledby="fb-ph-t">' + fbLogoHTML() + '<h2 id="fb-ph-t">¡Hola' + (first ? ", " + first : "") + '!</h2>' +
+    '<p>Déjanos tu WhatsApp para avisarte cuando tu pedido esté listo.</p>' +
+    '<input id="fb-ph" class="fb-in" type="tel" inputmode="tel" autocomplete="tel" placeholder="998 000 0000" aria-label="WhatsApp">' +
+    '<button type="button" class="fb-btn" id="fb-ph-ok">Guardar</button><button type="button" class="fb-link" id="fb-ph-skip">Ahora no</button></div>';
+  document.body.appendChild(el);
+  var inp = document.getElementById("fb-ph"); setTimeout(function () { inp.focus(); }, 50);
+  function ok() {
+    var v = inp.value.trim();
+    if (v.replace(/\D/g, "").length < 10) { toast("Escribe tu número a 10 dígitos"); inp.focus(); return; }
+    db.buyer.phone = v; saveDB(); el.remove(); toast("¡Listo, gracias!"); render(); fbRunThen();
+  }
+  document.getElementById("fb-ph-ok").onclick = ok;
+  inp.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); ok(); } };
+  document.getElementById("fb-ph-skip").onclick = function () {
+    el.remove();
+    if (FB.then && FB.then.act === "checkout") { FB.then = null; toast("Para hacer tu pedido necesitamos tu WhatsApp"); return; }
+    fbRunThen();
+  };
+}
+function fbOnCustomer(u) {
+  var r = fbRefs(), em = (u.email || "").toLowerCase();
+  FB.user = u;
+  r.cli.doc(u.uid).get().then(function (snap) {
+    var d = snap.exists ? JSON.parse(snap.data().json) : { name: u.displayName || em, email: em, phone: "", photo: u.photoURL || "", wishlist: [], wishMeta: {}, createdAt: Date.now() };
+    db.buyer = { id: u.uid, name: d.name || u.displayName || em, email: em, phone: d.phone || "", avatar: d.photo || u.photoURL || null };
+    var s = fbStore();
+    db.wishlists[u.uid] = {}; db.wishlists[u.uid][s.id] = d.wishlist || [];
+    db.wishMeta = db.wishMeta || {}; db.wishMeta[u.uid] = {}; db.wishMeta[u.uid][s.id] = d.wishMeta || {};
+    FB.meCreated = d.createdAt || Date.now(); FB.lastMe = snap.exists ? snap.data().json : null; FB.meOK = true;
+    if (!snap.exists) { fbFlush(); toast("¡Bienvenido a " + s.name + "!"); }
+    if (ui.modal && ui.modal.type === "login") ui.modal = null;
+    render();
+    if (!db.buyer.phone) fbAskPhone(); else fbRunThen();
+  }, function (e) { fbErr(e); toast("No pudimos cargar tu cuenta. Recarga la página."); });
+  r.ped.where("uid", "==", u.uid).onSnapshot(function (qs) {
+    var list = []; qs.forEach(function (d) { list.push(JSON.parse(d.data().json)); });
+    db.orders = list; render();
+  }, fbErr);
+}
+var _fbPlaceOrder = placeOrder;
+placeOrder = function (note) {
+  var s = curStore(), lines = cartLines(s);
+  if (!db.buyer || !FB.user) { FB.then = { act: "checkout", note: note }; fbSignIn(); return; }
+  var bad = lines.filter(function (x) { return x.line.qty > x.stock || x.unit == null; });
+  if (bad.length) { toast("Revisa tu carrito: " + bad[0].title + " ya no tiene suficiente stock"); render(); return; }
+  if (!lines.length) return;
+  if (!db.buyer.phone) { FB.then = { act: "checkout", note: note }; fbAskPhone(); return; }
+  var items = lines.map(function (x) {
+    if (x.prod) return { prodId: x.prod.id, name: x.prod.name, category: x.prod.category, qty: x.line.qty, unit: x.unit };
+    return { invId: x.it.id, printId: x.it.printId, finish: x.it.finish, cond: x.it.cond, qty: x.line.qty, unit: x.unit };
+  });
+  var r = fbRefs(), b = db.buyer;
+  toast("Enviando tu pedido…");
+  fdb.runTransaction(function (tx) {
+    return tx.get(r.cnt).then(function (c) {
+      var n = c.exists ? Number(c.data().n) + 1 : 1001;
+      if (c.exists) tx.update(r.cnt, { n: n }); else tx.set(r.cnt, { n: n });
+      return n;
+    });
+  }).then(function (n) {
+    var o = { id: uid("ord"), storeId: s.id, number: n, buyer: { id: b.id, name: b.name, email: b.email, phone: b.phone || "" }, items: items, status: "pendiente", createdAt: Date.now(), note: note || "" };
+    o.total = items.reduce(function (a, i) { return a + i.unit * i.qty; }, 0);
+    return r.ped.doc(o.id).set({ uid: FB.user.uid, json: JSON.stringify(o), at: Date.now() }).then(function () { return o; });
+  }).then(function (o) {
+    if (!db.orders.some(function (x) { return x.id === o.id; })) db.orders.push(o);
+    db.carts[s.id] = []; ui.lastOrder = o.id; ui.storeTab = "confirm"; ui.modal = null; saveDB(); render(); window.scrollTo(0, 0);
+  }).catch(function (e) { fbErr(e); toast("No se pudo enviar tu pedido. Revisa tu conexión e inténtalo otra vez."); });
+};
+ACT.loginBuyer = function () { fbSignIn(); };
+var _fbOpenModal = openModal;
+openModal = function (m) { if (m && m.type === "login") { FB.then = m.then || null; fbSignIn(); return; } return _fbOpenModal(m); };
+var _fbLogout = ACT.logoutBuyer;
+ACT.logoutBuyer = function (el) { if (fauth) fauth.signOut(); FB.user = null; FB.meOK = false; FB.lastMe = null; db.orders = []; return _fbLogout(el); };
+
+/* ---- Arranque ---- */
+function fbLoad(cb) {
+  var files = ["firebase-app-compat.js", "firebase-auth-compat.js", "firebase-firestore-compat.js"], i = 0;
+  (function next() {
+    if (i >= files.length) return cb();
+    var sc = document.createElement("script"); sc.src = FB_SDK + files[i++]; sc.onload = next;
+    sc.onerror = function () { if (APP_MODE === "panel") fbGate("error"); else toast("Sin conexión: no pudimos cargar la tienda."); };
+    document.head.appendChild(sc);
+  })();
+}
+function fbBoot() {
+  try { var c = JSON.parse(localStorage.getItem(FB_CART) || "null"); if (c) db.carts = c; } catch (e) {}
+  if (APP_MODE === "panel") fbGate("checking");
+  fbLoad(function () {
+    firebase.initializeApp(FB_CONFIG);
+    fauth = firebase.auth(); fdb = firebase.firestore();
+    if (APP_MODE !== "panel") {
+      fbRefs().pub.onSnapshot(function (snap) {
+        if (!snap.exists) return;
+        var j = snap.data().json; if (j === FB.lastPub) return;
+        FB.lastPub = j; fbApplyPub(JSON.parse(j)); render();
+      }, fbErr);
+    }
+    fauth.onAuthStateChanged(function (u) {
+      if (APP_MODE === "panel") { if (!u) { FB.user = null; FB.admin = false; fbGate("login"); return; } FB.user = u; fbCheckAdmin(u); return; }
+      if (u) fbOnCustomer(u);
+      else { FB.user = null; FB.meOK = false; db.buyer = null; db.orders = []; render(); }
+    });
+  });
+}
+
 saveDB();
 applyRoute();
 checkScryfall();
+fbBoot();
 window.addEventListener("storage", function (e) { if (e.key !== STORAGE_KEY || !e.newValue) return; var d = loadDB(); if (!d) return; db = d; try { migrateR7(); } catch (x) {} var m = ui.modal; render(); });
 </script>
 
