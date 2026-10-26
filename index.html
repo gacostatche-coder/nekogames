@@ -1151,13 +1151,13 @@ function viewStore() {
     '<form class="search" data-submit="storeSearch" role="search">' + ICON.search + '<label class="sr" for="s-q">Buscar cartas</label><input id="s-q" type="search" placeholder="Busca una carta o set…" value="' + esc(ui.filters.q) + '" data-input="storeQ" autocomplete="off"></form>' +
     '<div class="row" style="gap:8px">' +
     (buyer ? '<button type="button" class="sbtn" data-act="openProfile" aria-label="Mi perfil">' + avatarHTML(buyer, 28) + esc(buyer.name.split(" ")[0]) + "</button>"
-           : '<button type="button" class="sbtn" data-act="loginBuyer">' + ICON.user + "Entrar con Google</button>") +
+           : '<button type="button" class="sbtn" data-act="loginBuyer">' + ICON.user + "Entrar</button>") +
     '<button type="button" class="sbtn acc" data-act="storeTab" data-tab="cart">' + ICON.cart + 'Carrito <span class="mono">' + cartCount(s.id) + "</span></button></div></div>" +
     '<nav class="tabs" aria-label="Secciones">' + t("home", "Inicio") + t("catalog", "Cartas sueltas") + t("products", "Otros productos") + t("wishlist", "Mi wishlist") + t("orders", "Mis pedidos") + t("events", "Eventos") + "</nav></div></header>" +
     '<main class="wrap gut">' + body + "</main>" +
     '<footer class="foot"><div class="wrap gut"><div class="stack" style="gap:4px;max-width:440px"><strong style="color:var(--s-text);font-family:var(--f-display);font-size:16px">' + esc(s.name) + "</strong><span>" + esc(s.info.address || "") + "</span><span>" + esc(s.info.hours || "") + "</span></div>" +
     '<div class="stack" style="gap:4px"><span>WhatsApp: <span class="mono">' + esc(s.info.whatsapp || "—") + "</span></span><span>Formas de pago: las verás al confirmar tu pedido.</span></div>" +
-    '<div class="stack" style="gap:6px;align-self:flex-end;align-items:flex-end;font-size:13px"><button type="button" class="linkbtn" data-act="goAdmin">Acceso para la tienda</button><span>Tienda creada con [Nombre de la plataforma]</span></div></div></footer></div>';
+    '<div class="stack" style="gap:6px;align-self:flex-end;align-items:flex-end;font-size:13px"><button type="button" class="linkbtn" data-act="goAdmin">Acceso para la tienda</button></div></div></footer></div>';
 }
 
 function tileHTML(s, g) {
@@ -1325,7 +1325,7 @@ function storeCart(s) {
   return '<section class="stack"><h2>Tu carrito</h2><div class="panel">' + rows +
     '<form class="stack" data-submit="checkout" style="margin-top:18px"><label class="flabel" for="ck-note">Nota para la tienda (opcional)<textarea id="ck-note" class="sel" style="min-height:72px;padding:10px" placeholder="Ej. paso por ellas el sábado"></textarea></label>' +
     '<div class="row" style="justify-content:space-between"><div><span class="muted">Total</span><div class="price" style="font-size:28px">' + money(total) + "</div></div>" +
-    '<button type="submit" class="sbtn acc">' + (db.buyer ? "Hacer pedido" : "Entrar con Google y hacer pedido") + "</button></div>" +
+    '<button type="submit" class="sbtn acc">' + (db.buyer ? "Hacer pedido" : "Entrar y hacer pedido") + "</button></div>" +
     '<p class="muted" style="margin:0;font-size:13px">Al hacer el pedido apartamos tus productos ' + (s.info.holdHours || 48) + ' horas y te mostramos cómo pagar. Envía tu comprobante en ese plazo para que no vuelvan a la venta.</p></form></div></section>';
 }
 function storeConfirm(s) {
@@ -1417,9 +1417,10 @@ function flyerModal(s, m) {
 }
 function loginModal() {
   return '<div class="dlg plat sm"><button class="x" type="button" data-act="closeModal" aria-label="Cerrar">×</button><form class="stack" data-submit="buyerLogin">' +
-    '<h2 style="font-size:22px">Entrar con Google</h2><p class="hint" style="margin:0">Simulación para la demo. En la versión real aparece la ventana de Google y no hay que escribir nada.</p>' +
-    '<label class="field" for="bl-name">Nombre<input id="bl-name" required autocomplete="name" value="Gustavo"></label>' +
-    '<label class="field" for="bl-mail">Correo de Google<input id="bl-mail" type="email" required autocomplete="email" value="gustavo@example.com"></label>' +
+    '<h2 style="font-size:22px">Entra o crea tu cuenta</h2><p class="hint" style="margin:0">Con tu cuenta ves tus pedidos, tu wishlist y tu saldo en la tienda.</p>' +
+    '<label class="field" for="bl-name">Nombre<input id="bl-name" required autocomplete="name"></label>' +
+    '<label class="field" for="bl-mail">Correo<input id="bl-mail" type="email" required autocomplete="email"></label>' +
+    '<label class="field" for="bl-phone">WhatsApp<input id="bl-phone" type="tel" required autocomplete="tel" placeholder="998 000 0000"></label>' +
     '<button type="submit" class="btn pri">Continuar</button></form></div>';
 }
 
@@ -1564,7 +1565,7 @@ function renderAcSugg(q) {
   Object.keys(db.catalog).forEach(function (k) { var p = db.catalog[k]; if (norm(p.name).indexOf(q) >= 0) names[p.name] = true; });
   var local = Object.keys(names).sort().slice(0, 8);
   var html = local.map(function (n) { return '<button type="button" data-act="acName" data-name="' + esc(n) + '">' + esc(n) + "</button>"; }).join("");
-  el.innerHTML = html ? '<div class="sugg">' + html + "</div>" : '<p class="muted" style="margin:0">' + (ui.online ? "Buscando…" : "No está en el catálogo de ejemplo.") + "</p>";
+  el.innerHTML = html ? '<div class="sugg">' + html + "</div>" : '<p class="muted" style="margin:0">' + (ui.online ? "Buscando…" : "No encontramos esa carta. Revisa el nombre o tu conexión a internet.") + "</p>";
   if (ui.online) {
     var my = ++acSeq;
     clearTimeout(acTimer);
@@ -1589,7 +1590,7 @@ function admImport(s) {
       '<div class="card stack"><h2 style="font-size:18px">1 · Sube tu archivo</h2>' +
       '<label class="field" for="imp-file">Archivo CSV (desde Excel: Guardar como → CSV)<input id="imp-file" type="file" accept=".csv,.txt,.tsv,text/csv" data-change="impFile"></label>' +
       '<label class="field" for="imp-text">O pega aquí el contenido<textarea id="imp-text" class="mono" style="min-height:180px;font-size:13px" placeholder="nombre,set,numero,foil,condicion,idioma,cantidad,precio_fijo,precio">' + esc(imp && imp.text || "") + "</textarea></label>" +
-      '<div class="row"><button type="button" class="btn pri" data-act="impRun">Revisar cartas</button><button type="button" class="btn" data-act="impSample">Usar ejemplo</button></div>' +
+      '<div class="row"><button type="button" class="btn pri" data-act="impRun">Revisar cartas</button></div>' +
       (imp && imp.error ? '<p class="pill bad" style="align-self:flex-start">' + esc(imp.error) + "</p>" : "") + "</div>" +
       '<details class="card"><summary style="cursor:pointer;font-weight:600">Formato de la plantilla</summary><div class="stack" style="margin-top:12px">' +
       '<div class="tbl-box"><table class="tbl mono" style="min-width:560px;font-size:13px"><thead><tr><th>nombre</th><th>set</th><th>numero</th><th>foil</th><th>condicion</th><th>idioma</th><th>cantidad</th><th>precio_fijo</th><th>precio</th></tr></thead><tbody><tr><td>Sol Ring</td><td>CMM</td><td>410</td><td>no</td><td>NM</td><td>EN</td><td>8</td><td>no</td><td></td></tr><tr><td>The One Ring</td><td>LTR</td><td>246</td><td>no</td><td>NM</td><td>EN</td><td>1</td><td>si</td><td>990</td></tr></tbody></table></div>' +
@@ -1678,7 +1679,7 @@ function runImport(text, fileName) {
         return row;
       }
     }
-    row.state = "error"; row.reason = ui.online ? "No encontramos esta carta." : "No está en el catálogo de ejemplo (con conexión se busca en Scryfall).";
+    row.state = "error"; row.reason = ui.online ? "No encontramos esta carta." : "No encontramos esta carta. Revisa el nombre o tu conexión a internet.";
     row.notFound = true;
     return row;
   });
@@ -1826,7 +1827,7 @@ function admPricing(s) {
     '<div class="card stack"><h2 style="font-size:18px">Margen y tipo de cambio</h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">' +
     '<label class="field" for="pr-margin">Margen de ganancia (%)<input id="pr-margin" type="number" step="0.5" min="0" max="300" value="' + pr.margin + '" class="mono"></label>' +
     '<div class="field">Tipo de cambio en uso<span class="mono" style="font-size:20px;color:var(--ink);padding-top:8px">$' + pr.fx.toFixed(2) + '</span></div></div>' +
-    '<p class="muted" style="margin:0;font-size:13px">El tipo de cambio automático se conecta en la versión real con una API diaria.</p></div>' +
+    '<p class="muted" style="margin:0;font-size:13px">Este valor convierte a pesos los precios de referencia en dólares.</p></div>' +
     '<div class="card stack"><h2 style="font-size:18px">Precio por condición (% del NM)</h2><div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">' +
     CONDS.map(function (c) { return '<label class="field" for="pr-' + c + '">' + c + '<input id="pr-' + c + '" type="number" min="1" max="100" value="' + pr.cond[c] + '" class="mono"></label>'; }).join("") + "</div></div>" +
     '<button type="submit" class="btn pri" style="align-self:flex-start">Guardar y recalcular</button></form>' +
@@ -2168,7 +2169,13 @@ var SUBMIT = {
   },
   storeSearch: function () { ui.storeTab = "catalog"; render(); var i = document.getElementById("s-q"); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } },
   buyerLogin: function (f) {
-    db.buyer = { id: uid("u"), name: f.querySelector("#bl-name").value.trim(), email: f.querySelector("#bl-mail").value.trim().toLowerCase(), phone: "", avatar: null };
+    var _nm = f.querySelector("#bl-name").value.trim(), _em = f.querySelector("#bl-mail").value.trim().toLowerCase(), _ph = f.querySelector("#bl-phone").value.trim(), _st = curStore();
+    if (!db.clients) db.clients = [];
+    var _cl = db.clients.filter(function (x) { return x.storeId === _st.id && (x.email || "").toLowerCase() === _em; })[0];
+    var _bid = (_cl && _cl.buyerId) || uid("u");
+    if (!_cl) { _cl = { id: uid("cl"), storeId: _st.id, name: _nm, phone: _ph, email: _em, buyerId: _bid, source: "online", notes: "", createdAt: Date.now() }; db.clients.push(_cl); }
+    else { _cl.buyerId = _bid; if (!_cl.phone && _ph) _cl.phone = _ph; if (!_cl.name) _cl.name = _nm; }
+    db.buyer = { id: _bid, name: _nm, email: _em, phone: _ph || _cl.phone || "", avatar: null };
     var then = ui.modal && ui.modal.then; saveDB();
     toast("Hola, " + db.buyer.name.split(" ")[0]);
     if (then && then.act === "wish") { var w = wishOf(curStore().id); if (w.indexOf(then.id) < 0) w.push(then.id); saveDB(); ui.modal = then.back || null; render(); return; }
@@ -2203,7 +2210,7 @@ var CHANGE = {
   invQty: function (el) { var it = db.inventory.filter(function (i) { return i.id === el.dataset.id; })[0]; it.qty = Math.max(0, parseInt(el.value, 10) || 0); saveDB(); toast("Cantidad actualizada"); render(); },
   impFile: function (el) {
     var f = el.files && el.files[0]; if (!f) return;
-    if (/\.xlsx?$/i.test(f.name)) { ui.imp = { error: "Este prototipo lee CSV. En Excel usa Archivo → Guardar como → CSV. La versión real también aceptará .xlsx." }; render(); return; }
+    if (/\.xlsx?$/i.test(f.name)) { ui.imp = { error: "Por ahora se aceptan archivos CSV. En Excel usa Archivo → Guardar como → CSV." }; render(); return; }
     var r = new FileReader(); r.onload = function () { runImport(String(r.result), f.name); render(); }; r.readAsText(f);
   },
   apName: function (el) { var s = curStore(); if (el.value.trim()) { s.name = el.value.trim(); saveDB(); render(); toast("Nombre guardado"); } },
@@ -2415,7 +2422,7 @@ function admImportProducts(s) {
     return '<div class="head"><div><h1>Cargar otros productos</h1><p class="muted" style="margin:0">Micas, sellado, accesorios. Cada producto lleva su precio fijo.</p></div></div>' +
       '<div class="card stack"><label class="field" for="ip-file">Archivo CSV (desde Excel: Guardar como → CSV)<input id="ip-file" type="file" accept=".csv,.txt,.tsv,text/csv" data-change="impProdFile"></label>' +
       '<label class="field" for="ip-text">O pega aquí el contenido<textarea id="ip-text" class="mono" style="min-height:160px;font-size:13px" placeholder="' + PROD_HEADERS + '">' + esc(imp && imp.text || "") + "</textarea></label>" +
-      '<div class="row"><button type="button" class="btn pri" data-act="impProdRun">Revisar productos</button><button type="button" class="btn" data-act="impProdSample">Usar ejemplo</button><button type="button" class="btn sm" data-act="copyProdTemplate">Copiar encabezados</button></div>' +
+      '<div class="row"><button type="button" class="btn pri" data-act="impProdRun">Revisar productos</button><button type="button" class="btn sm" data-act="copyProdTemplate">Copiar encabezados</button></div>' +
       (imp && imp.error ? '<p class="pill bad" style="align-self:flex-start">' + esc(imp.error) + "</p>" : "") + "</div>" +
       '<div class="card stack"><h2 style="font-size:16px">Formato</h2><div class="tbl-box"><table class="tbl mono" style="min-width:560px;font-size:13px"><thead><tr><th>nombre</th><th>categoria</th><th>precio</th><th>cantidad</th><th>descripcion</th></tr></thead><tbody><tr><td>Micas Dragon Shield · 100</td><td>Micas</td><td>260</td><td>10</td><td>Tamaño estándar</td></tr></tbody></table></div>' +
       '<p class="muted" style="margin:0">Precio y cantidad son obligatorios. Si el producto ya existe con el mismo nombre, se suma la cantidad y se actualiza el precio.</p></div>';
@@ -2518,7 +2525,7 @@ Object.assign(CHANGE, {
   prodImg: function (el) { var f = el.files && el.files[0]; if (!f) return; prodFromForm(); readImageSized(f, 900, "image/jpeg", function (url) { if (ui.modal && ui.modal.type === "prod") { ui.modal.data.img = url; renderModal(); } }); },
   impProdFile: function (el) {
     var f = el.files && el.files[0]; if (!f) return;
-    if (/\.xlsx?$/i.test(f.name)) { ui.impP = { error: "Este prototipo lee CSV. En Excel usa Archivo → Guardar como → CSV." }; render(); return; }
+    if (/\.xlsx?$/i.test(f.name)) { ui.impP = { error: "Por ahora se aceptan archivos CSV. En Excel usa Archivo → Guardar como → CSV." }; render(); return; }
     var r = new FileReader(); r.onload = function () { runProdImport(String(r.result), f.name); render(); }; r.readAsText(f);
   }
 });
@@ -3209,10 +3216,10 @@ function fxCardHTML(s) {
   var pr = s.pricing, m = pr.fxMode === "fixadj" ? "fix" : (pr.fxMode || "manual");
   function opt(v, l, d) { return '<label class="fxopt" for="fx-' + v + '"><input type="radio" name="fxmode" id="fx-' + v + '" value="' + v + '" data-change="fxMode"' + (m === v ? " checked" : "") + '><span><strong>' + l + '</strong><br><span class="muted" style="font-size:12px">' + d + "</span></span></label>"; }
   return '<form class="card stack" data-submit="saveFx" style="margin-bottom:4px"><h2 style="font-size:18px">Tipo de cambio USD → MXN</h2>' +
-    '<div class="row" style="gap:10px"><span class="pill brand">FIX Banxico: $' + pr.fixValue.toFixed(2) + " · " + fmtISO(pr.fixDate) + '</span><button type="button" class="btn sm" data-act="fxFetch">Consultar Banxico ahora</button></div>' +
-    '<div class="fxopts">' + opt("fix", "FIX de Banxico", "Se actualiza solo cada día") + opt("manual", "Manual", "Tú escribes el valor") + "</div>" +
-    '<div class="stack" style="gap:6px;max-width:320px"><label class="field" for="fx-manval">Valor manual<input id="fx-manval" type="number" step="0.01" min="1" value="' + (pr.manualFx || pr.fx) + '" class="mono"' + (m === "fix" ? " disabled" : "") + '></label><span id="fx-manual-note" class="pill warn" style="align-self:flex-start;white-space:normal;border-radius:8px"' + (m === "fix" ? "" : " hidden") + '>No se está tomando en cuenta: se usa el FIX de Banxico.</span></div>' +
-    '<p class="hint" style="margin:0">Tipo de cambio en uso: <strong class="mono">$' + effFx(pr).toFixed(2) + "</strong>. En el prototipo el FIX es un valor de ejemplo; en la versión real se consulta la API de Banxico una vez al día.</p>" +
+    '<p class="muted" style="margin:0;font-size:14px">Consulta el FIX del día en <a href="https://www.banxico.org.mx/tipcamb/main.do?page=tip&idioma=sp" target="_blank" rel="noopener">Banxico</a> y escríbelo aquí.</p>' +
+    '' +
+    '<div class="stack" style="gap:6px;max-width:320px"><label class="field" for="fx-manval">Tipo de cambio (MXN por 1 USD)<input id="fx-manval" type="number" step="0.01" min="1" value="' + (pr.manualFx || pr.fx) + '" class="mono"' + (m === "fix" ? " disabled" : "") + '></label><span id="fx-manual-note" class="pill warn" style="align-self:flex-start;white-space:normal;border-radius:8px"' + (m === "fix" ? "" : " hidden") + '>No se está tomando en cuenta: se usa el FIX de Banxico.</span></div>' +
+    '<p class="hint" style="margin:0">Tipo de cambio en uso: <strong class="mono">$' + effFx(pr).toFixed(2) + "</strong>.</p>" +
     '<button type="submit" class="btn pri" style="align-self:flex-start">Guardar tipo de cambio</button></form>';
 }
 
@@ -3719,6 +3726,7 @@ document.addEventListener("keydown", function (e) { if (e.key === "Escape" && ui
 document.addEventListener("error", function (e) { var t = e.target; if (t && t.tagName === "IMG" && t.dataset.card) t.remove(); }, true);
 
 window.addEventListener("hashchange", function () { applyRoute(); });
+db.stores.forEach(function (x) { if (x.pricing.fxMode !== "manual") { x.pricing.fxMode = "manual"; x.pricing.fx = x.pricing.manualFx || x.pricing.fx; } });
 if (!db.blankDone) { (function () { var s = db.stores.filter(function (x) { return x.id === "store-dr"; })[0] || db.stores[0]; db.stores = [s]; ["inventory","products","orders","events","payments","internal","promos","clients","tabs","clientPays","audit"].forEach(function (k) { db[k] = []; }); db.carts = {}; db.wishlists = {}; db.wishMeta = {}; db.buyerInfo = {}; db.buyer = null; db.wishSeeded = true; s.categories = []; s.nextOrder = 1001; s.theme.slides = []; s.adminEmail = ""; s.info.address = ""; s.info.whatsapp = ""; s.info.hours = ""; db.blankDone = true; })(); }
 saveDB();
 applyRoute();
