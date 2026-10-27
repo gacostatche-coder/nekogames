@@ -473,6 +473,22 @@ input[disabled] { opacity: .5; cursor: not-allowed; }
 .buylist { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
 .buylist li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
 @media (max-width: 900px) { .wside { position: static; max-width: none; } }
+
+/* Ronda 11 */
+@media (min-width: 721px) {
+  .adm { align-items: flex-start; }
+  .adm-side { position: sticky; top: 0; height: 100vh; overflow-y: auto; box-sizing: border-box; overscroll-behavior: contain; }
+}
+.adm-side nav button { min-height: 38px; padding: 8px 12px; }
+.tcline { display: grid; grid-template-columns: minmax(0, 1fr) 104px 84px; gap: 8px; align-items: center; padding: 4px 0; }
+.tcline .tcname { min-width: 0; overflow-wrap: anywhere; }
+.tcline .tcname s { font-size: 12px; }
+.tcprice { display: flex; align-items: center; gap: 4px; color: var(--ink2); }
+.tcprice input { width: 100%; min-height: 36px; padding: 4px 8px; text-align: right; }
+.tcline .num { text-align: right; }
+
+.tile.is-out img, .tile.is-out .cardimg, .lrow.is-out .thumb { filter: grayscale(.85); opacity: .7; }
+.tag.out { background: transparent; border: 1px solid currentColor; opacity: .85; }
 .st .s-head .logo{width:62px!important;height:62px!important;border-radius:50%!important;background:#FFF4E5!important;padding:5px;box-shadow:0 0 0 2px #15211F}
 .st .s-head .bname{font-size:23px!important}
 [data-act="adminLogout"]{display:none!important}
@@ -813,7 +829,7 @@ var db = loadDB();
 var ui = {
   view: "landing", routeKey: null, storeId: null, storeTab: "home", adminTab: "cuentas", superTab: "tiendas", payMonth: monthKey(),
   superLogged: false, adminLogged: {},
-  filters: { q: "", color: "all", type: "all", cond: "all", format: "all", foil: false, sort: "recent" },
+  filters: { q: "", color: "all", type: "all", cond: "all", format: "all", foil: false, sort: "recent", stock: "all" },
   invQ: "", orderFilter: "todos", modal: null, imp: null, online: false, confirmDel: null, lastOrder: null, slide: 0
 };
 
@@ -843,19 +859,25 @@ function wishKey() { return db.buyer ? (db.buyer.id || db.buyer.email) : null; }
 function wishOf(storeId) { var k = wishKey(); if (!k) return []; db.wishlists[k] = db.wishlists[k] || {}; db.wishlists[k][storeId] = db.wishlists[k][storeId] || []; return db.wishlists[k][storeId]; }
 
 /* Agrupa inventario por versión (printId): una ficha por versión con todas sus condiciones y acabados. */
-function groupedInventory(store) {
+function groupedInventory(store, withOut) {
   var map = {};
   invOf(store.id).forEach(function (it) {
-    if (it.qty <= 0) return;
+    if (it.qty <= 0 && !withOut) return;
     var p = printOf(it.printId); if (!p) return;
-    var g = map[it.printId] || (map[it.printId] = { p: p, items: [], min: null, qty: 0, addedAt: 0, foil: false, conds: {} });
+    var g = map[it.printId] || (map[it.printId] = { p: p, items: [], all: [], min: null, outMin: null, qty: 0, addedAt: 0, foil: false, conds: {} });
     var u = unitPrice(store, it);
-    g.items.push(it); g.qty += it.qty; g.addedAt = Math.max(g.addedAt, it.addedAt);
+    g.all.push(it); g.addedAt = Math.max(g.addedAt, it.addedAt || 0);
+    if (it.qty <= 0) { if (u != null && (g.outMin == null || u < g.outMin)) g.outMin = u; return; }
+    g.items.push(it); g.qty += it.qty;
     if (u != null && (g.min == null || u < g.min)) g.min = u;
     if (it.finish !== "normal") g.foil = true;
     g.conds[it.cond] = true;
   });
-  return Object.keys(map).map(function (k) { var g = map[k]; g.condList = CONDS.filter(function (c) { return g.conds[c]; }); g.multi = g.items.length > 1; return g; });
+  return Object.keys(map).map(function (k) {
+    var g = map[k]; g.out = !g.items.length;
+    if (g.out) { g.items = g.all; g.min = g.outMin; }
+    g.condList = CONDS.filter(function (c) { return g.conds[c]; }); g.multi = !g.out && g.items.length > 1; return g;
+  });
 }
 function bestSellers(store) {
   var tally = {};
@@ -1160,8 +1182,15 @@ function viewStore() {
     '<div class="stack" style="gap:6px;align-self:flex-end;align-items:flex-end;font-size:13px"><button type="button" class="linkbtn" data-act="goAdmin">Acceso para la tienda</button></div></div></footer></div>';
 }
 
+function outAction(s, p) {
+  var w = wishOf(s.id).indexOf(p.id) >= 0;
+  return '<button type="button" class="sbtn sm" data-act="wishToggle" data-id="' + p.id + '" aria-pressed="' + w + '">' + (w ? ICON.heartFill + "En tu wishlist" : ICON.heart + "Wishlist") + "</button>";
+}
 function tileHTML(s, g) {
   var p = g.p;
+  if (g.out) return '<article class="tile is-out"><button type="button" class="open" data-act="openCard" data-id="' + p.id + '">' + cardImg(p, {}) +
+    '<div><h3>' + esc(p.name) + '</h3><span class="code">' + esc(p.set) + " · #" + esc(p.num) + "</span></div></button>" +
+    '<div class="tags"><span class="tag out">Agotada</span></div><div class="row" style="justify-content:space-between;margin-top:auto;gap:8px"><span class="muted" style="font-size:13px">Sin existencia</span>' + outAction(s, p) + "</div></article>";
   var tags = g.condList.map(function (c) { return '<span class="tag">' + c + "</span>"; }).join("") + (g.foil ? '<span class="tag">FOIL</span>' : "");
   var action = g.multi ? '<button type="button" class="sbtn sm" data-act="openCard" data-id="' + p.id + '">Ver opciones</button>'
     : '<button type="button" class="sbtn sm acc" data-act="quickAdd" data-inv="' + g.items[0].id + '">Agregar</button>';
@@ -1171,6 +1200,8 @@ function tileHTML(s, g) {
 }
 function listRowHTML(s, g) {
   var p = g.p;
+  if (g.out) return '<div class="lrow is-out">' + thumb(p) + '<button type="button" class="nm" data-act="openCard" data-id="' + p.id + '"><strong>' + esc(p.name) + '</strong><span class="code">' + esc(p.set) + " · #" + esc(p.num) + " · " + esc(p.setName) + "</span></button>" +
+    '<div class="tags"><span class="tag out">Agotada</span></div><span class="muted num" style="font-size:13px;min-width:80px">Sin existencia</span><span style="min-width:120px"></span>' + outAction(s, p) + "</div>";
   var action = g.multi ? '<button type="button" class="sbtn sm" data-act="openCard" data-id="' + p.id + '">Ver opciones</button>'
     : '<button type="button" class="sbtn sm acc" data-act="quickAdd" data-inv="' + g.items[0].id + '">Agregar</button>';
   return '<div class="lrow">' + thumb(p) + '<button type="button" class="nm" data-act="openCard" data-id="' + p.id + '"><strong>' + esc(p.name) + '</strong><span class="code">' + esc(p.set) + " · #" + esc(p.num) + " · " + esc(p.setName) + "</span></button>" +
@@ -1263,8 +1294,11 @@ function storeHome(s) {
 function typeBucket(t) { t = norm(t); if (/tierra/.test(t)) return "tierra"; if (/criatura/.test(t)) return "criatura"; if (/instant/.test(t)) return "instantaneo"; if (/conjuro/.test(t)) return "conjuro"; if (/artefacto/.test(t)) return "artefacto"; if (/encantamiento/.test(t)) return "encantamiento"; return "otro"; }
 function filteredGroups(s) {
   var f = ui.filters, q = norm(f.q);
-  var gs = groupedInventory(s).filter(function (g) {
+  var st = f.stock || "all";
+  var gs = groupedInventory(s, true).filter(function (g) {
     var p = g.p;
+    if (st === "in" && g.out) return false;
+    if (st === "out" && !g.out) return false;
     if (q && norm(p.name + " " + p.set + " " + p.setName).indexOf(q) < 0) return false;
     if (f.color !== "all" && p.color !== f.color) return false;
     if (f.type !== "all" && typeBucket(p.type) !== f.type) return false;
@@ -1275,7 +1309,8 @@ function filteredGroups(s) {
   });
   var by = { recent: function (a, b) { return b.addedAt - a.addedAt; }, name: function (a, b) { return a.p.name.localeCompare(b.p.name); },
     asc: function (a, b) { return (a.min || 0) - (b.min || 0); }, desc: function (a, b) { return (b.min || 0) - (a.min || 0); } };
-  return gs.sort(by[f.sort] || by.recent);
+  var cmp = by[f.sort] || by.recent;
+  return gs.sort(function (a, b) { return (a.out - b.out) || cmp(a, b); });
 }
 function storeCatalog(s) {
   var f = ui.filters;
@@ -1287,6 +1322,7 @@ function storeCatalog(s) {
     '<label class="flabel" for="f-cond">Condición<select id="f-cond" class="sel" data-change="filter" data-k="cond">' + opt("all", "Cualquiera", f.cond) + CONDS.map(function (c) { return opt(c, c + " · " + COND_LABEL[c], f.cond); }).join("") + "</select></label>" +
     '<label class="flabel" for="f-format">Formato<select id="f-format" class="sel" data-change="filter" data-k="format">' + opt("all", "Todos", f.format) + FORMATS.map(function (x) { return opt(x[0], x[1], f.format); }).join("") + "</select></label>" +
     '<label class="flabel" for="f-sort">Ordenar<select id="f-sort" class="sel" data-change="filter" data-k="sort">' + opt("recent", "Más recientes", f.sort) + opt("name", "Nombre", f.sort) + opt("asc", "Precio: menor a mayor", f.sort) + opt("desc", "Precio: mayor a menor", f.sort) + "</select></label>" +
+    '<label class="flabel" for="f-stock">Existencia<select id="f-stock" class="sel" data-change="filter" data-k="stock">' + opt("all", "Todas", f.stock || "all") + opt("in", "Solo con existencia", f.stock || "all") + opt("out", "Agotadas (para tu wishlist)", f.stock || "all") + "</select></label>" +
     '<label class="row" style="min-height:42px;gap:10px" for="f-foil"><input id="f-foil" type="checkbox" data-change="filterFoil" style="width:20px;height:20px;accent-color:var(--s-accent)"' + (f.foil ? " checked" : "") + "> Solo foil</label></div></section>" +
     '<section class="stack" style="gap:14px"><div class="row" style="justify-content:space-between"><h2>Cartas sueltas</h2><span class="muted" id="res-count"></span></div><div id="results"></div></section>';
 }
@@ -1356,7 +1392,7 @@ function manaHTML(str) {
 /* Ficha de carta (modal): imagen y versiones a la izquierda; texto de la carta, acabado, condición y compra a la derecha. */
 function cardModal(s, m) {
   var p0 = printOf(m.printId);
-  var groups = groupedInventory(s).filter(function (g) { return g.p.name === p0.name; });
+  var groups = groupedInventory(s, true).filter(function (g) { return g.p.name === p0.name; });
   if (!groups.length) groups = [{ p: p0, items: [], qty: 0 }];
   var g = groups.filter(function (x) { return x.p.id === m.printId; })[0] || groups[0];
   var p = g.p;
@@ -1552,7 +1588,7 @@ function addCardModal(s, m) {
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px"><label class="field" for="ac-fin">Acabado<select id="ac-fin">' + fins + "</select></label>" +
     '<label class="field" for="ac-cond">Condición<select id="ac-cond">' + CONDS.map(function (c) { return opt(c, c + " · " + COND_LABEL[c], f.cond || "NM"); }).join("") + "</select></label>" +
     '<label class="field" for="ac-lang">Idioma<select id="ac-lang">' + ["EN", "ES", "JA", "PT", "DE", "FR", "IT"].map(function (l) { return opt(l, l, f.lang || "EN"); }).join("") + "</select></label>" +
-    '<label class="field" for="ac-qty">Cantidad<input id="ac-qty" type="number" min="1" value="' + (f.qty || 1) + '" required class="num"></label></div>' +
+    '<label class="field" for="ac-qty">Cantidad<input id="ac-qty" type="number" min="0" value="' + (f.qty != null && f.qty !== "" ? f.qty : 1) + '" required class="num"></label></div>' +
     '<label class="field" for="ac-price">Precio fijo MXN (opcional: si lo llenas, esta carta no toma el precio de la plataforma)<input id="ac-price" type="number" min="0" step="1" class="mono" placeholder="Automático" value="' + esc(f.price || "") + '"></label>' +
     errBox +
     '<div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-act="acBackPrints">Otra versión</button><button type="submit" class="btn pri"' + (m.saving ? " disabled" : "") + ">" + (m.saving ? "Consultando precio…" : "Agregar al inventario") + "</button></div></form></div></div>";
@@ -1655,9 +1691,9 @@ function runImport(text, fileName) {
   var out = rows.slice(1).map(function (r, n) {
     function g(k) { return idx[k] >= 0 ? String(r[idx[k]] || "").trim() : ""; }
     var row = { line: n + 2, name: g("name"), set: g("set").toUpperCase(), num: g("num"), finish: mapFoil(g("foil")), cond: mapCond(g("cond")), lang: (g("lang") || "EN").toUpperCase().slice(0, 2), qty: parseInt(g("qty"), 10), sid: g("sid"), fixed: mapFoil(g("fixed")) === "foil", price: parseFloat(String(g("price")).replace(/[$,\s]/g, "")) };
-    row.raw = [row.name, row.set, row.num, row.finish !== "normal" ? row.finish : "", g("cond"), row.qty || "(sin cantidad)"].filter(Boolean).join(" · ");
+    row.raw = [row.name, row.set, row.num, row.finish !== "normal" ? row.finish : "", g("cond"), row.qty === 0 ? "cantidad 0" : (row.qty || "(sin cantidad)")].filter(Boolean).join(" · ");
     if (!row.cond) { row.state = "error"; row.reason = "Condición «" + g("cond") + "» no válida. Usa NM, LP, MP o HP."; return row; }
-    if (!(row.qty > 0)) { row.state = "error"; row.reason = "Falta la cantidad."; return row; }
+    if (!(row.qty >= 0)) { row.state = "error"; row.reason = "Falta la cantidad (puede ser 0)."; return row; }
     if (row.fixed && !(row.price > 0)) { row.state = "error"; row.reason = "Marcaste precio fijo pero falta el precio."; return row; }
     if (row.fixed) row.raw += " · precio fijo " + money(row.price);
     var matches = [];
@@ -1822,8 +1858,8 @@ function admPricing(s) {
   function src(id, label, desc) { return '<button type="button" data-act="setSource" data-src="' + id + '" aria-pressed="' + (pr.source === id) + '" style="text-align:left;padding:10px 14px"><strong>' + label + '</strong><br><span class="muted" style="font-size:13px;font-weight:400">' + desc + "</span></button>"; }
   return '<div class="head"><div><h1>Precios y margen</h1><p class="muted" style="margin:0">El precio de cada carta se recalcula solo cuando cambian estos valores o el precio de referencia.</p></div></div>' +
     fxCardHTML(s) + '<div class="split"><form class="a" data-submit="savePricing">' +
-    '<div class="card stack"><h2 style="font-size:18px">Fuente de precio base (USD)</h2><div class="seg" role="group" aria-label="Fuente">' + src("tcgplayer", "TCGplayer", "Vía Scryfall / MTGJSON") + src("cardkingdom", "Card Kingdom", "Vía MTGJSON") + "</div>" +
-    '<p class="muted" style="margin:0;font-size:13px">Si una versión no tiene precio en esta fuente se usa la otra. StarCityGames no tiene datos públicos.</p></div>' +
+    '<div class="card stack"><h2 style="font-size:18px">Fuente de precio base (USD)</h2><div class="seg" role="group" aria-label="Fuente">' + src("tcgplayer", "TCGplayer", "Vía Scryfall, al día") + src("cardkingdom", "Card Kingdom", "Lista diaria de Card Kingdom") + "</div>" +
+    '' + ckStatusHTML() + '</div>' +
     '<div class="card stack"><h2 style="font-size:18px">Margen y tipo de cambio</h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">' +
     '<label class="field" for="pr-margin">Margen de ganancia (%)<input id="pr-margin" type="number" step="0.5" min="0" max="300" value="' + pr.margin + '" class="mono"></label>' +
     '<div class="field">Tipo de cambio en uso<span class="mono" style="font-size:20px;color:var(--ink);padding-top:8px">$' + pr.fx.toFixed(2) + '</span></div></div>' +
@@ -2183,12 +2219,13 @@ var SUBMIT = {
     ui.modal = null; render();
   },
   checkout: function (f) { var note = f.querySelector("#ck-note").value.trim(); if (!db.buyer) { openModal({ type: "login", then: { act: "checkout", note: note } }); return; } placeOrder(note); },
-  savePrice: function (f) { var it = db.inventory.filter(function (i) { return i.id === f.dataset.id; })[0], v = f.querySelector("#pm-val").value; it.price = v === "" ? null : Math.max(0, Number(v)); saveDB(); ui.modal = null; render(); toast("Precio guardado"); },
+  savePrice: function (f) { var it = db.inventory.filter(function (i) { return i.id === f.dataset.id; })[0], v = f.querySelector("#pm-val").value; it.price = v === "" ? null : Math.max(0, Number(v)); it.fixed = it.price != null; saveDB(); ui.modal = null; render(); toast(it.fixed ? "Precio fijo guardado" : "Precio automático"); },
   acSave: function (f) {
     var s = curStore(), m = ui.modal, p = addToCatalog(m.print);
     var price = f.querySelector("#ac-price").value;
-    addInventory(s, p.id, f.querySelector("#ac-fin").value, f.querySelector("#ac-cond").value, f.querySelector("#ac-lang").value, Math.max(1, parseInt(f.querySelector("#ac-qty").value, 10) || 1), price === "" ? null : Number(price));
-    saveDB(); ui.modal = null; ui.invQ = ""; render(); toast(p.name + " agregada al inventario");
+    addInventory(s, p.id, f.querySelector("#ac-fin").value, f.querySelector("#ac-cond").value, f.querySelector("#ac-lang").value, (function (v) { return isNaN(v) ? 1 : Math.max(0, v); })(parseInt(f.querySelector("#ac-qty").value, 10)), price === "" ? null : Number(price));
+    var q0 = parseInt(f.querySelector("#ac-qty").value, 10) === 0;
+    saveDB(); ui.modal = null; ui.invQ = ""; render(); toast(p.name + (q0 ? " agregada sin existencia: tus clientes la pueden encontrar y mandar a su wishlist" : " agregada al inventario"));
   },
   savePricing: function (f) {
     var s = curStore(), pr = s.pricing;
@@ -2780,8 +2817,9 @@ function fetchPrintPrice(p, fin) {
 function readAcForm() { var g = grab(["ac-fin", "ac-cond", "ac-lang", "ac-qty", "ac-price"]); ui.modal.form = { fin: g["ac-fin"], cond: g["ac-cond"], lang: g["ac-lang"], qty: g["ac-qty"], price: g["ac-price"] }; return ui.modal.form; }
 function commitAcCard(note) {
   var s = curStore(), m = ui.modal, f = m.form, p = addToCatalog(m.print);
-  addInventory(s, p.id, f.fin, f.cond, f.lang, Math.max(1, parseInt(f.qty, 10) || 1), f.price === "" || f.price == null ? null : Number(f.price));
-  saveDB(); ui.modal = null; ui.invQ = ""; render(); toast(p.name + " agregada" + (note ? " · " + note : ""));
+  var q = parseInt(f.qty, 10); q = isNaN(q) ? 1 : Math.max(0, q);
+  addInventory(s, p.id, f.fin, f.cond, f.lang, q, f.price === "" || f.price == null ? null : Number(f.price));
+  saveDB(); ui.modal = null; ui.invQ = ""; render(); toast(p.name + (q === 0 ? " agregada sin existencia: tus clientes la pueden encontrar y mandar a su wishlist" : " agregada") + (note ? " · " + note : ""));
 }
 function runAcSave() {
   var m = ui.modal, f = m.form, p = m.print;
@@ -3053,7 +3091,13 @@ function tabCloseModal(m) {
   var c = t.clientId && clientById(t.clientId);
   var promoRows = r.applied.map(function (a) { return '<div class="sumrow ok"><span>' + esc(a.name) + (a.times > 1 ? " × " + a.times : "") + ' <button type="button" class="linkbtn" data-act="tabPromoOff" data-id="' + a.promoId + '" style="font-size:12px">quitar</button></span><span>−' + money(a.saving) + "</span></div>"; }).join("") +
     r.removed.map(function (p) { return '<div class="sumrow muted"><span><s>' + esc(p.name) + '</s> <button type="button" class="linkbtn" data-act="tabPromoOn" data-id="' + p.id + '" style="font-size:12px">volver a aplicar</button></span><span></span></div>'; }).join("");
-  var lines = t.lines.map(function (l) { return '<div class="sumrow"><span>' + l.qty + " × " + esc(l.name) + '</span><span class="num">' + money(l.unit * l.qty) + "</span></div>"; }).join("");
+  var editable = m.step !== "confirm";
+  var lines = t.lines.map(function (l, i) {
+    if (!editable) return '<div class="sumrow"><span>' + l.qty + " × " + esc(l.name) + '</span><span class="num">' + money(l.unit * l.qty) + "</span></div>";
+    return '<div class="tcline"><span class="tcname">' + l.qty + " × " + esc(l.name) + (l.origUnit != null && l.origUnit !== l.unit ? ' <s class="muted">' + money(l.origUnit) + "</s>" : "") + "</span>" +
+      '<label class="tcprice">$<input type="number" min="0" step="0.5" inputmode="decimal" class="mono" value="' + l.unit + '" data-change="tabLinePrice" data-i="' + i + '" aria-label="Precio unitario de ' + esc(l.name) + '"></label>' +
+      '<span class="num">' + money(l.unit * l.qty) + "</span></div>";
+  }).join("") + (editable ? '<p class="muted" style="margin:2px 0 6px;font-size:12px">Puedes cambiar el precio unitario de cada producto antes de cobrar.</p>' : "");
   var head = '<div class="dlg plat sm"><button class="x" type="button" data-act="closeModal" aria-label="Cerrar">×</button><div class="stack"><h2 style="font-size:22px">Cerrar cuenta · ' + esc(tabName(t)) + "</h2>" +
     '<div class="card sumbox" style="padding:14px">' + lines + '<div class="sumrow" style="border-top:1px solid var(--line);padding-top:6px"><span>Subtotal</span><span>' + money(r.subtotal) + "</span></div>" + promoRows + '<div class="sumrow total"><span>Total a cobrar</span><span>' + money(r.total) + "</span></div></div>";
   if (m.step === "confirm") {
@@ -3725,6 +3769,130 @@ document.addEventListener("keydown", function (e) { if (e.key === "Escape" && ui
 /* Si una imagen de Scryfall no carga, se queda la silueta de color. */
 document.addEventListener("error", function (e) { var t = e.target; if (t && t.tagName === "IMG" && t.dataset.card) t.remove(); }, true);
 
+/* Ronda 11: precio editable al cerrar cuenta, precios Card Kingdom, menú del panel fijo */
+function tabAuditUser() { return (typeof FB !== "undefined" && FB.user && FB.user.email) || (curStore().adminEmail) || "Administrador"; }
+function applyTabPrice(el) {
+  var m = ui.modal; if (!m || m.type !== "tabClose") return false;
+  var t = tabOf(m.id), l = t && t.lines[Number(el.dataset.i)]; if (!l) return false;
+  if (el.value === "" || !(Number(el.value) >= 0)) { el.value = l.unit; toast("Escribe un precio válido"); return false; }
+  var v = Math.round(Number(el.value) * 100) / 100; if (v === l.unit) return false;
+  var before = computeTab(t).total;
+  readTabCloseForm();
+  var d = m.data; if (d.amount == null || Math.abs(d.amount - before) < 0.005) delete d.amount;
+  if (l.origUnit == null) l.origUnit = l.unit;
+  var old = l.unit; l.unit = v;
+  auditLog(t.storeId, "Cuentas abiertas", "Cambió el precio de «" + l.name + "» en la cuenta de " + tabName(t) + ": " + money(old) + " → " + money(v), tabAuditUser());
+  return true;
+}
+Object.assign(CHANGE, {
+  tabLinePrice: function (el) { if (applyTabPrice(el)) { saveDB(); renderModal(); toast("Precio actualizado"); } }
+});
+(function () {
+  var prev = SUBMIT.tabCloseNext;
+  SUBMIT.tabCloseNext = function (f) {
+    var ch = false;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-change="tabLinePrice"]'), function (el) { if (applyTabPrice(el)) ch = true; });
+    if (ch) saveDB();
+    return prev.apply(this, arguments);
+  };
+})();
+
+/* ---- Card Kingdom: ck-precios.json lo genera cada día GitHub Actions, solo con las cartas de la tienda ---- */
+var CK = { state: "idle", at: null, n: 0, total: 0, data: null, seen: {} };
+function ckSfid(p) { return p.scryfallId || (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/.test(p.id) ? p.id : null); }
+function ckApply() {
+  if (!CK.data) return false;
+  var map = CK.data.p || {}, seen = CK.seen, s = curStore(), used = {}, ch = false;
+  (db.inventory || []).forEach(function (i) { if (i.storeId === s.id) used[i.printId] = 1; });
+  Object.keys(used).forEach(function (id) {
+    var p = db.catalog[id]; if (!p) return;
+    var sid = ckSfid(p); if (!sid || !seen[sid]) return; /* aún no revisada: se queda como está */
+    var v = map[sid], nv = { normal: v ? v[0] : null, foil: v ? v[1] : null };
+    if (!p.prices) p.prices = {};
+    var cur = p.prices.cardkingdom || {};
+    if (cur.normal !== nv.normal || cur.foil !== nv.foil) { p.prices.cardkingdom = nv; ch = true; }
+  });
+  return ch;
+}
+function ckLoad() {
+  if (CK.state !== "idle") return;
+  CK.state = "loading";
+  fetch("ck-precios.json", { cache: "no-cache" }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(function (d) {
+      CK.data = d; CK.at = d.at || null; CK.seen = {}; (d.revisadas || []).forEach(function (x) { CK.seen[x] = 1; });
+      CK.state = "ok"; ckApply(); render();
+    })
+    .catch(function () { CK.state = "none"; render(); });
+}
+function ckDate(at) {
+  if (!at) return "";
+  var d = new Date(String(at).replace(" ", "T"));
+  return isNaN(d) ? String(at) : d.toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" });
+}
+/* Cartas con existencia que no tomaron precio de Card Kingdom. */
+function ckMissing(s) {
+  if (CK.state !== "ok") return null;
+  var t = CK.at ? new Date(CK.at).getTime() : 0;
+  return (db.inventory || []).filter(function (i) { return i.storeId === s.id && Number(i.qty) > 0; }).map(function (i) {
+    var p = printOf(i.printId); if (!p) return null;
+    var ck = p.prices && p.prices.cardkingdom;
+    if (ck && ck[i.finish] != null) return null;
+    var sid = ckSfid(p), checked = sid && CK.seen[sid];
+    return { it: i, p: p, isNew: !checked && (!t || !i.addedAt || i.addedAt > t - 60000) };
+  }).filter(Boolean);
+}
+function ckStatusHTML() {
+  ckLoad();
+  var s = curStore(), tx;
+  if (CK.state === "ok") {
+    var miss = ckMissing(s) || [], all = (db.inventory || []).filter(function (i) { return i.storeId === s.id && Number(i.qty) > 0; }).length;
+    tx = "Card Kingdom: actualizado el <strong>" + esc(ckDate(CK.at)) + "</strong> · " + (all - miss.length) + " de " + all + " cartas con existencia tienen precio de Card Kingdom." +
+      (miss.length ? " Las demás usan el de TCGplayer" + (s.pricing.source === "cardkingdom" ? " (abajo está la lista)." : ".") : "");
+  } else if (CK.state === "none") tx = "La actualización diaria de Card Kingdom todavía no está activada en tu sitio. Mientras tanto, todas las cartas usan el precio de TCGplayer.";
+  else tx = "Consultando los precios de Card Kingdom…";
+  return '<p class="muted" style="margin:0;font-size:13px">' + tx + "</p>";
+}
+function ckMissingHTML(s) {
+  if (s.pricing.source !== "cardkingdom") return "";
+  var list = ckMissing(s); if (!list) return "";
+  var head = '<div class="card stack"><div class="row" style="justify-content:space-between;gap:10px"><h2 style="font-size:18px">Cartas sin precio de Card Kingdom' + (list.length ? " (" + list.length + ")" : "") + "</h2>" +
+    (list.length ? '<button type="button" class="btn sm" data-act="ckCopy">Copiar lista</button>' : "") + "</div>";
+  if (!list.length) return head + '<p class="muted" style="margin:0">Todas tus cartas con existencia tomaron su precio de Card Kingdom (actualización del ' + esc(ckDate(CK.at)) + ").</p></div>";
+  var rank = function (x) { return x.it.fixed ? 2 : (autoPrice(s, x.it) == null ? 0 : 1); };
+  list.sort(function (a, b) { return rank(a) - rank(b) || a.p.name.localeCompare(b.p.name); });
+  var rows = list.map(function (x) {
+    var i = x.it, p = x.p, u = unitPrice(s, i), why;
+    if (i.fixed) why = '<span class="pill">Precio fijo</span>';
+    else if (u == null) why = '<span class="pill bad">Sin precio</span>';
+    else why = '<span class="pill warn">Usa TCGplayer</span>';
+    return "<tr><td><strong>" + esc(p.name) + '</strong><br><span class="muted" style="font-size:12px">' + esc(p.set + " · #" + p.num) + "</span></td>" +
+      "<td>" + esc(FINISH_LABEL[i.finish] || i.finish) + " · " + esc(i.cond) + '</td><td class="num">' + i.qty + "</td>" +
+      '<td class="num">' + (u == null ? "—" : money(u)) + "</td><td>" + why + (x.isNew ? '<br><span class="muted" style="font-size:12px">Nueva: se revisa mañana</span>' : '<br><span class="muted" style="font-size:12px">No está en Card Kingdom</span>') + "</td>" +
+      '<td><button type="button" class="btn sm" data-act="invPrice" data-id="' + i.id + '">' + (i.fixed ? "Cambiar precio" : "Fijar precio") + "</button></td></tr>";
+  }).join("");
+  return head + '<p class="muted" style="margin:0">Estas cartas no tomaron precio de Card Kingdom en la actualización del ' + esc(ckDate(CK.at)) + '. Revísalas y, si quieres, ponles un precio fijo; las que no tengan precio fijo siguen con el de TCGplayer.</p>' +
+    '<div class="tbl-box"><table class="tbl"><thead><tr><th>Carta</th><th>Versión</th><th class="num">Cant.</th><th class="num">Precio en tienda</th><th>Estado</th><th></th></tr></thead><tbody>' + rows + "</tbody></table></div></div>";
+}
+Object.assign(ACT, {
+  ckCopy: function () {
+    var s = curStore(), list = ckMissing(s) || [];
+    var txt = "Cartas sin precio de Card Kingdom (" + ckDate(CK.at) + ")\n" + list.map(function (x) { var u = unitPrice(s, x.it); return "- " + x.p.name + " (" + x.p.set + " #" + x.p.num + ", " + (FINISH_LABEL[x.it.finish] || x.it.finish) + ", " + x.it.cond + ") · " + (u == null ? "sin precio" : money(u)); }).join("\n");
+    copyText(txt, "Lista copiada");
+  }
+});
+var _ckAdmPricing = admPricing;
+admPricing = function (s) { return _ckAdmPricing(s) + ckMissingHTML(s); };
+/* Cada vez que se dibuja el panel con la lista cargada, las cartas nuevas toman su precio CK. */
+var _jRender = render;
+render = function () {
+  var a = document.querySelector(".adm-side"), top = a ? a.scrollTop : 0;
+  ckLoad();
+  if (CK.data && ckApply()) saveDB();
+  var r = _jRender.apply(this, arguments);
+  var b = document.querySelector(".adm-side"); if (b && top) b.scrollTop = top;
+  return r;
+};
+
 window.addEventListener("hashchange", function () { applyRoute(); });
 db.stores.forEach(function (x) { if (x.pricing.fxMode !== "manual") { x.pricing.fxMode = "manual"; x.pricing.fx = x.pricing.manualFx || x.pricing.fx; } });
 if (!db.blankDone) { (function () { var s = db.stores.filter(function (x) { return x.id === "store-dr"; })[0] || db.stores[0]; db.stores = [s]; ["inventory","products","orders","events","payments","internal","promos","clients","tabs","clientPays","audit"].forEach(function (k) { db[k] = []; }); db.carts = {}; db.wishlists = {}; db.wishMeta = {}; db.buyerInfo = {}; db.buyer = null; db.wishSeeded = true; s.categories = []; s.nextOrder = 1001; s.theme.slides = []; s.adminEmail = ""; s.info.address = ""; s.info.whatsapp = ""; s.info.hours = ""; db.blankDone = true; })(); }
@@ -3760,7 +3928,7 @@ var G_ICON = '<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"
 function fbStore() { return db.stores[0]; }
 function fbRefs() {
   var t = fdb.collection("tiendas").doc(FB_SLUG);
-  return { pub: t, priv: t.collection("privado").doc("datos"), acc: t.collection("acceso").doc("admins"), cnt: t.collection("contador").doc("pedidos"), ped: t.collection("pedidos"), cli: t.collection("clientes") };
+  return { pub: t, priv: t.collection("privado").doc("datos"), acc: t.collection("acceso").doc("admins"), cnt: t.collection("contador").doc("pedidos"), ped: t.collection("pedidos"), cli: t.collection("clientes"), img: t.collection("imagenes") };
 }
 function fbErr(e) {
   try { console.warn("[firebase]", e && (e.code || e.message) || e); } catch (x) {}
@@ -3788,6 +3956,40 @@ function fbApplyPub(d) {
   ui.storeId = d.store.id;
 }
 
+/* Las imágenes (banners, eventos, logo) van en documentos aparte: un documento de Firestore admite hasta 1 MB. */
+FB.imgs = {}; FB.pubSeq = 0;
+function fbHash(str) { var h1 = 0x811c9dc5, h2 = 7; for (var i = 0; i < str.length; i++) { var c = str.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619) >>> 0; h2 = (Math.imul(h2, 31) + c) >>> 0; } return h1.toString(36) + h2.toString(36) + str.length.toString(36); }
+function fbPack(obj) {
+  var refs = {};
+  var json = JSON.stringify(obj, function (k, v) {
+    if (typeof v === "string" && v.length > 20000 && v.indexOf("data:image/") === 0) { var id = "im" + fbHash(v); FB.imgs[id] = v; refs[id] = 1; return "fbimg:" + id; }
+    return v;
+  });
+  return { json: json, refs: Object.keys(refs) };
+}
+function fbRefsIn(json) { var out = {}, re = /"fbimg:(im[a-z0-9]+)"/g, m; while ((m = re.exec(json || ""))) out[m[1]] = 1; return Object.keys(out); }
+/* Trae las imágenes que falten y entrega los datos ya con sus imágenes. */
+function fbUnpack(json, cb) {
+  var r = fbRefs(), miss = fbRefsIn(json).filter(function (id) { return !FB.imgs[id]; });
+  Promise.all(miss.map(function (id) { return r.img.doc(id).get().then(function (d) { if (d.exists) FB.imgs[id] = d.data().data; }, function () {}); })).then(function () {
+    cb(JSON.parse(json, function (k, v) { return typeof v === "string" && v.indexOf("fbimg:") === 0 ? (FB.imgs[v.slice(6)] || "") : v; }));
+  });
+}
+function fbOnPub(snap, admin) {
+  if (!snap.exists) { if (admin) { FB.pubOK = true; fbFlush(); } return; }
+  var j = snap.data().json; if ((FB.pubOK || !admin) && j === FB.lastPub) return;
+  FB.lastPub = j; var seq = ++FB.pubSeq;
+  fbUnpack(j, function (d) {
+    if (seq !== FB.pubSeq) return;
+    fbApplyPub(d);
+    if (admin) { FB.pubOK = true; fbApplyStock(); }
+    render();
+  });
+}
+/* El historial guarda el correo de quien hizo el cambio. */
+var _fbAuditLog = auditLog;
+auditLog = function (sid, cat, text, who) { if (FB.admin && FB.user && who !== "Super admin") who = FB.user.email; return _fbAuditLog(sid, cat, text, who); };
+
 /* Guardado: el navegador solo guarda el carrito; lo demás va a la nube. */
 _saveDBraw = function () {
   try { localStorage.setItem(FB_CART, JSON.stringify(db.carts || {})); } catch (e) {}
@@ -3799,7 +4001,27 @@ function fbFlush() {
   var r = fbRefs(), now = Date.now();
   if (FB.admin) {
     if (!FB.pubOK || !FB.privOK) return;
-    var pj = JSON.stringify(fbPubData()); if (pj !== FB.lastPub) { FB.lastPub = pj; r.pub.set({ json: pj, at: now }).catch(fbErr); }
+    var pk = fbPack(fbPubData()), pj = pk.json;
+    if (pj !== FB.lastPub) {
+      if (pj.length > 1000000) { toast("Se llenó el espacio de datos de la tienda: no se pudo guardar este cambio."); }
+      else {
+        var prevRefs = fbRefsIn(FB.lastPub); FB.lastPub = pj;
+        var known = FB.imgKnown || (FB.imgKnown = {});
+        prevRefs.forEach(function (id) { known[id] = 1; });
+        var ups = pk.refs.filter(function (id) { return !known[id]; }).map(function (id) {
+          if (FB.imgs[id].length > 1000000) return Promise.reject({ code: "too-big" });
+          return r.img.doc(id).set({ data: FB.imgs[id], at: now }).then(function () { known[id] = 1; });
+        });
+        Promise.all(ups).then(function () {
+          return r.pub.set({ json: pj, at: now }).then(function () {
+            prevRefs.forEach(function (id) { if (pk.refs.indexOf(id) < 0) { delete known[id]; r.img.doc(id).delete().catch(function () {}); } });
+          });
+        }).catch(function (e) {
+          fbErr(e); FB.lastPub = null;
+          toast(e && e.code === "too-big" ? "La imagen es demasiado pesada. Usa una más ligera." : "No se pudo guardar el cambio. Revisa tu conexión e inténtalo de nuevo.");
+        });
+      }
+    }
     var vj = JSON.stringify(fbPrivData()); if (vj !== FB.lastPriv) { FB.lastPriv = vj; r.priv.set({ json: vj, at: now }).catch(fbErr); }
     if (FB.ordOK) {
       var seen = {};
@@ -3843,11 +4065,7 @@ function fbCheckAdmin(u) {
 function fbAdminOK() {
   FB.admin = true; fbGate(null);
   var r = fbRefs();
-  r.pub.onSnapshot(function (snap) {
-    if (!snap.exists) { FB.pubOK = true; fbFlush(); return; }
-    var j = snap.data().json; if (FB.pubOK && j === FB.lastPub) return;
-    FB.lastPub = j; fbApplyPub(JSON.parse(j)); FB.pubOK = true; fbApplyStock(); render();
-  }, fbErr);
+  r.pub.onSnapshot(function (snap) { fbOnPub(snap, true); }, fbErr);
   r.priv.onSnapshot(function (snap) {
     if (!snap.exists) { FB.privOK = true; fbMergeAllClients(); fbFlush(); return; }
     var j = snap.data().json; if (FB.privOK && j === FB.lastPriv) return;
@@ -4037,11 +4255,7 @@ function fbBoot() {
     firebase.initializeApp(FB_CONFIG);
     fauth = firebase.auth(); fdb = firebase.firestore();
     if (APP_MODE !== "panel") {
-      fbRefs().pub.onSnapshot(function (snap) {
-        if (!snap.exists) return;
-        var j = snap.data().json; if (j === FB.lastPub) return;
-        FB.lastPub = j; fbApplyPub(JSON.parse(j)); render();
-      }, fbErr);
+      fbRefs().pub.onSnapshot(function (snap) { fbOnPub(snap, false); }, fbErr);
     }
     fauth.onAuthStateChanged(function (u) {
       if (APP_MODE === "panel") { if (!u) { FB.user = null; FB.admin = false; fbGate("login"); return; } FB.user = u; fbCheckAdmin(u); return; }
