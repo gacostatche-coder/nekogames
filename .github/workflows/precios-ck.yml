@@ -1,0 +1,72 @@
+name: Precios Card Kingdom
+
+on:
+  schedule:
+    - cron: "17 10 * * *"   # todos los días, 5:17 am hora de Cancún
+  workflow_dispatch:         # botón para correrlo a mano
+
+permissions:
+  contents: write
+
+env:
+  PROYECTO: plataforma-tcg-821c5
+  TIENDA: neko-games
+
+jobs:
+  precios:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Descargar lista de precios de Card Kingdom
+        run: curl -fsSL --retry 3 -A "Mozilla/5.0 (compatible; tienda-tcg-precios)" https://api.cardkingdom.com/api/v2/pricelist -o ck_raw.json
+
+      - name: Cruzar con las cartas de la tienda
+        run: |
+          python3 - <<'PY'
+          import json, os, re, urllib.request, datetime
+          d = json.load(open("ck_raw.json"))
+          ck = {}
+          for p in d.get("data", []):
+              sid = p.get("scryfall_id")
+              try:
+                  pr = float(p.get("price_retail") or 0)
+              except ValueError:
+                  continue
+              if not sid or pr <= 0:
+                  continue
+              k = 1 if str(p.get("is_foil")).lower() == "true" else 0
+              cur = ck.setdefault(sid, [None, None])
+              if cur[k] is None or pr < cur[k]:
+                  cur[k] = round(pr, 2)
+          print("cartas en Card Kingdom:", len(ck))
+
+          url = "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/tiendas/%s" % (os.environ["PROYECTO"], os.environ["TIENDA"])
+          doc = json.load(urllib.request.urlopen(url, timeout=60))
+          tienda = json.loads(doc["fields"]["json"]["stringValue"])
+          cat = tienda.get("catalog", {})
+          ids = set()
+          for i in tienda.get("inventory", []):
+              pid = i.get("printId") or ""
+              sid = (cat.get(pid) or {}).get("scryfallId") or (pid if re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-", pid) else None)
+              if sid:
+                  ids.add(sid)
+          precios = {s: ck[s] for s in ids if s in ck}
+          print("cartas de la tienda:", len(ids), "· con precio:", len(precios), "· sin precio:", len(ids) - len(precios))
+          out = {
+              "at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "ck": (d.get("meta") or {}).get("created_at"),
+              "p": precios,
+              "revisadas": sorted(ids),
+          }
+          json.dump(out, open("ck-precios.json", "w"), separators=(",", ":"))
+          PY
+          rm ck_raw.json
+
+      - name: Guardar en el sitio
+        run: |
+          git config user.name "precios-bot"
+          git config user.email "precios-bot@users.noreply.github.com"
+          git add ck-precios.json
+          git diff --cached --quiet || git commit -m "Precios Card Kingdom $(date -u +%F)"
+          git push
