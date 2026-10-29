@@ -489,6 +489,9 @@ input[disabled] { opacity: .5; cursor: not-allowed; }
 
 .tile.is-out img, .tile.is-out .cardimg, .lrow.is-out .thumb { filter: grayscale(.85); opacity: .7; }
 .tag.out { background: transparent; border: 1px solid currentColor; opacity: .85; }
+
+.dsel { min-height: 36px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); font: inherit; font-size: 13px; max-width: 150px; }
+.printgrid .opt[hidden] { display: none !important; }
 .st .s-head .logo{width:62px!important;height:62px!important;border-radius:50%!important;background:#FFF4E5!important;padding:5px;box-shadow:0 0 0 2px #15211F}
 .st .s-head .bname{font-size:23px!important}
 [data-act="goAdmin"]{display:none!important}
@@ -851,7 +854,9 @@ function unitPrice(store, item) {
   var p = printOf(item.printId), b = basePrice(store, p, item.finish);
   if (b == null) return null;
   var f = (store.pricing.cond[item.cond] || 100) / 100;
-  return Math.round(b * store.pricing.fx * (1 + store.pricing.margin / 100) * f * 100) / 100;
+  var v = Math.round(b * store.pricing.fx * (1 + store.pricing.margin / 100) * f * 100) / 100;
+  var mn = Number(store.pricing.minPrice) || 0;
+  return mn > 0 && v < mn ? mn : v;
 }
 function cartOf(storeId) { if (!db.carts[storeId]) db.carts[storeId] = []; return db.carts[storeId]; }
 function cartCount(storeId) { return cartOf(storeId).reduce(function (s, l) { return s + l.qty; }, 0); }
@@ -1019,8 +1024,16 @@ function enrichCatalog() {
 }
 function scryfallPrints(name) {
   return sfFetch("https://api.scryfall.com/cards/named?fuzzy=" + encodeURIComponent(name)).then(function (c) {
-    return sfFetch("https://api.scryfall.com/cards/search?unique=prints&order=released&q=" + encodeURIComponent('!"' + c.name + '" game:paper'));
-  }).then(function (r) { return (r.data || []).slice(0, 40).map(fromScryfall); });
+    var all = [];
+    function page(url, n) {
+      return sfFetch(url).then(function (r) {
+        all = all.concat(r.data || []);
+        if (r.has_more && r.next_page && n < 12) return new Promise(function (ok) { setTimeout(ok, 110); }).then(function () { return page(r.next_page, n + 1); });
+        return all;
+      });
+    }
+    return page("https://api.scryfall.com/cards/search?unique=prints&include_variations=true&order=released&dir=desc&q=" + encodeURIComponent('!"' + c.name + '" game:paper'), 1);
+  }).then(function (data) { return data.map(fromScryfall); });
 }
 function addToCatalog(p) { if (!db.catalog[p.id]) db.catalog[p.id] = p; return db.catalog[p.id]; }
 
@@ -1192,6 +1205,8 @@ function tileHTML(s, g) {
     '<div><h3>' + esc(p.name) + '</h3><span class="code">' + esc(p.set) + " · #" + esc(p.num) + "</span></div></button>" +
     '<div class="tags"><span class="tag out">Agotada</span></div><div class="row" style="justify-content:space-between;margin-top:auto;gap:8px"><span class="muted" style="font-size:13px">Sin existencia</span>' + outAction(s, p) + "</div></article>";
   var tags = g.condList.map(function (c) { return '<span class="tag">' + c + "</span>"; }).join("") + (g.foil ? '<span class="tag">FOIL</span>' : "");
+  var lgs = {}; g.items.forEach(function (i) { var l = String(i.lang || "EN").toUpperCase(); if (l !== "EN" && i.qty > 0) lgs[l] = 1; });
+  tags += Object.keys(lgs).map(function (l) { return '<span class="tag" title="' + langName(l) + '">' + l + "</span>"; }).join("");
   var action = g.multi ? '<button type="button" class="sbtn sm" data-act="openCard" data-id="' + p.id + '">Ver opciones</button>'
     : '<button type="button" class="sbtn sm acc" data-act="quickAdd" data-inv="' + g.items[0].id + '">Agregar</button>';
   return '<article class="tile"><button type="button" class="open" data-act="openCard" data-id="' + p.id + '">' + cardImg(p, { foil: !g.multi && g.items[0].finish !== "normal" }) +
@@ -1208,6 +1223,9 @@ function listRowHTML(s, g) {
     '<div class="tags">' + g.condList.map(function (c) { return '<span class="tag">' + c + "</span>"; }).join("") + (g.foil ? '<span class="tag">FOIL</span>' : "") + "</div>" +
     '<span class="muted num" style="font-size:13px;min-width:80px">' + g.qty + ' en stock</span><span class="price" style="min-width:120px;text-align:right">' + money(g.min) + "</span>" + action + "</div>";
 }
+var LANG_NAME = { EN: "Inglés", ES: "Español", JA: "Japonés", DE: "Alemán", FR: "Francés", IT: "Italiano", PT: "Portugués", KO: "Coreano", RU: "Ruso", ZH: "Chino" };
+function langName(l) { l = String(l || "EN").toUpperCase(); return LANG_NAME[l] || l; }
+function langSuffix(l) { l = String(l || "EN").toUpperCase(); return l === "EN" ? "" : " · " + langName(l); }
 function cardsHTML(s, groups) {
   if (!groups.length) return '<div class="empty">No encontramos cartas con esos filtros.</div>';
   return s.theme.view === "list" ? '<div class="list">' + groups.map(function (g) { return listRowHTML(s, g); }).join("") + "</div>"
@@ -1291,7 +1309,18 @@ function storeHome(s) {
   return out || '<div class="empty">Esta tienda aún no configura su portada.</div>';
 }
 
-function typeBucket(t) { t = norm(t); if (/tierra/.test(t)) return "tierra"; if (/criatura/.test(t)) return "criatura"; if (/instant/.test(t)) return "instantaneo"; if (/conjuro/.test(t)) return "conjuro"; if (/artefacto/.test(t)) return "artefacto"; if (/encantamiento/.test(t)) return "encantamiento"; return "otro"; }
+function typeBucket(t) {
+  /* Sirve con el tipo en inglés (Scryfall: "Artifact Creature — Golem") o en español; en cartas de dos caras toma la cara frontal. */
+  t = norm(String(t || "").split("//")[0]);
+  if (/criatura|creature/.test(t)) return "criatura";
+  if (/planeswalker/.test(t)) return "planeswalker";
+  if (/tierra|\bland\b/.test(t)) return "tierra";
+  if (/instant/.test(t)) return "instantaneo";
+  if (/conjuro|sorcery/.test(t)) return "conjuro";
+  if (/artefacto|artifact/.test(t)) return "artefacto";
+  if (/encantamiento|enchantment/.test(t)) return "encantamiento";
+  return "otro";
+}
 function filteredGroups(s) {
   var f = ui.filters, q = norm(f.q);
   var st = f.stock || "all";
@@ -1318,7 +1347,7 @@ function storeCatalog(s) {
     .map(function (c) { return '<button type="button" class="chip" data-act="filterColor" data-c="' + c[0] + '" aria-pressed="' + (f.color === c[0]) + '"><span class="dot" style="background:' + c[2] + '"></span>' + c[1] + "</button>"; }).join("");
   function opt(v, l, cur) { return '<option value="' + v + '"' + (cur === v ? " selected" : "") + ">" + l + "</option>"; }
   return '<section class="panel filters" aria-labelledby="flt-t"><h2 id="flt-t" style="font-size:18px">Filtrar inventario</h2><div class="row" style="gap:8px">' + chips + "</div>" +
-    '<div class="fgrid"><label class="flabel" for="f-type">Tipo<select id="f-type" class="sel" data-change="filter" data-k="type">' + opt("all", "Todos", f.type) + opt("criatura", "Criatura", f.type) + opt("instantaneo", "Instantáneo", f.type) + opt("conjuro", "Conjuro", f.type) + opt("artefacto", "Artefacto", f.type) + opt("encantamiento", "Encantamiento", f.type) + opt("tierra", "Tierra", f.type) + "</select></label>" +
+    '<div class="fgrid"><label class="flabel" for="f-type">Tipo<select id="f-type" class="sel" data-change="filter" data-k="type">' + opt("all", "Todos", f.type) + opt("criatura", "Criatura", f.type) + opt("instantaneo", "Instantáneo", f.type) + opt("conjuro", "Conjuro", f.type) + opt("artefacto", "Artefacto", f.type) + opt("encantamiento", "Encantamiento", f.type) + opt("tierra", "Tierra", f.type) + opt("planeswalker", "Planeswalker", f.type) + opt("otro", "Otro (batalla, etc.)", f.type) + "</select></label>" +
     '<label class="flabel" for="f-cond">Condición<select id="f-cond" class="sel" data-change="filter" data-k="cond">' + opt("all", "Cualquiera", f.cond) + CONDS.map(function (c) { return opt(c, c + " · " + COND_LABEL[c], f.cond); }).join("") + "</select></label>" +
     '<label class="flabel" for="f-format">Formato<select id="f-format" class="sel" data-change="filter" data-k="format">' + opt("all", "Todos", f.format) + FORMATS.map(function (x) { return opt(x[0], x[1], f.format); }).join("") + "</select></label>" +
     '<label class="flabel" for="f-sort">Ordenar<select id="f-sort" class="sel" data-change="filter" data-k="sort">' + opt("recent", "Más recientes", f.sort) + opt("name", "Nombre", f.sort) + opt("asc", "Precio: menor a mayor", f.sort) + opt("desc", "Precio: mayor a menor", f.sort) + "</select></label>" +
@@ -1341,7 +1370,7 @@ function cartLines(s) {
     var it = db.inventory.filter(function (i) { return i.id === l.invId; })[0];
     if (!it) return null;
     var p = printOf(it.printId);
-    return { line: l, key: "i:" + it.id, it: it, p: p, stock: it.qty, unit: unitPrice(s, it), title: p.name, sub: p.set + " · #" + p.num + " · " + FINISH_LABEL[it.finish] + " · " + it.cond, pic: thumb(p) };
+    return { line: l, key: "i:" + it.id, it: it, p: p, stock: it.qty, unit: unitPrice(s, it), title: p.name, sub: p.set + " · #" + p.num + " · " + FINISH_LABEL[it.finish] + " · " + it.cond + langSuffix(it.lang), pic: thumb(p) };
   }).filter(Boolean);
 }
 function storeCart(s) {
@@ -1378,7 +1407,7 @@ function buyerOrderTable(o) {
   var rows = o.items.map(function (i) {
     var name, sub;
     if (i.prodId) { var pr = prodById(i.prodId) || {}; name = i.name || pr.name; sub = i.category || pr.category || ""; }
-    else { var p = printOf(i.printId); name = p.name; sub = p.set + " · #" + p.num + " · " + FINISH_LABEL[i.finish] + " · " + i.cond; }
+    else { var p = printOf(i.printId); name = p.name; sub = p.set + " · #" + p.num + " · " + FINISH_LABEL[i.finish] + " · " + i.cond + langSuffix(i.lang); }
     return "<tr><td>" + esc(name) + '<br><span class="code">' + esc(sub) + '</span></td><td class="num r">' + money(i.unit) + '</td><td class="num c">' + i.qty + '</td><td class="num r"><strong>' + money(i.unit * i.qty) + "</strong></td></tr>";
   }).join("");
   var paid = paidOf(o), due = dueOf(o);
@@ -1398,8 +1427,17 @@ function cardModal(s, m) {
   var p = g.p;
   var fins = ["normal", "foil", "etched"].filter(function (f) { return p.finishes.indexOf(f) >= 0; });
   var finish = m.finish && fins.indexOf(m.finish) >= 0 ? m.finish : (g.items[0] ? g.items[0].finish : fins[0]);
-  var rows = CONDS.map(function (c) { return g.items.filter(function (i) { return i.finish === finish && i.cond === c; })[0]; });
-  var selIt = (m.invId && g.items.filter(function (i) { return i.id === m.invId && i.finish === finish; })[0]) || rows.filter(function (x) { return x && x.qty > 0; })[0];
+  /* Idioma: la misma versión puede estar en varios idiomas; el cliente elige cuál. */
+  var LG = function (i) { return String(i.lang || "EN").toUpperCase(); };
+  var langs = []; g.items.forEach(function (i) { if (i.finish === finish && langs.indexOf(LG(i)) < 0) langs.push(LG(i)); });
+  langs.sort(function (a, b) { return (a === "EN" ? -1 : 0) - (b === "EN" ? -1 : 0) || a.localeCompare(b); });
+  var hasLang = function (l) { return g.items.some(function (i) { return i.finish === finish && LG(i) === l && i.qty > 0; }); };
+  var invSel = m.invId && g.items.filter(function (i) { return i.id === m.invId && i.finish === finish; })[0];
+  var lang = (invSel && LG(invSel)) || (m.lang && langs.indexOf(m.lang) >= 0 ? m.lang : null) || langs.filter(hasLang)[0] || langs[0] || "EN";
+  var rows = CONDS.map(function (c) { var cs = g.items.filter(function (i) { return i.finish === finish && i.cond === c && LG(i) === lang; }); return cs.filter(function (i) { return i.qty > 0; })[0] || cs[0]; });
+  var selIt = invSel || rows.filter(function (x) { return x && x.qty > 0; })[0];
+  var langBtns = langs.length > 1 ? '<div class="stack" style="gap:8px"><h3 class="lbl">Idioma</h3><div class="row" style="gap:8px">' + langs.map(function (l) { var has = hasLang(l); return '<button type="button" class="chip" data-act="cmLang" data-l="' + l + '" aria-pressed="' + (l === lang) + '"' + (has ? "" : " disabled") + ">" + langName(l) + (has ? "" : " · sin stock") + "</button>"; }).join("") + "</div></div>"
+    : (lang !== "EN" ? '<div class="stack" style="gap:8px"><h3 class="lbl">Idioma</h3><span>' + langName(lang) + "</span></div>" : "");
   var inCart = selIt ? (cartOf(s.id).filter(function (l) { return l.invId === selIt.id; })[0] || { qty: 0 }).qty : 0;
   var maxQ = selIt ? Math.max(0, selIt.qty - inCart) : 0;
   var qty = Math.min(Math.max(1, m.qty || 1), Math.max(1, maxQ));
@@ -1422,8 +1460,8 @@ function cardModal(s, m) {
     '<div class="info"><div class="stack" style="gap:4px"><div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px;padding-right:44px"><h2 style="font-size:30px">' + esc(p.name) + "</h2>" + (p.mana ? '<span class="manacost">' + manaHTML(p.mana) + "</span>" : "") + "</div>" +
     '<span class="muted">' + esc(p.type) + " · " + esc(p.rarity || "") + '</span></div>' + oracle + formatOvals(p) +
     '<div class="stack" style="gap:8px"><h3 class="lbl">Acabado</h3><div class="row" style="gap:8px">' + finBtns + "</div></div>" +
-    '<div class="stack" style="gap:8px"><h3 class="lbl">Condición</h3><div class="condlist">' + condRows + "</div></div>" +
-    '<div class="addbox"><div style="flex:1 1 160px"><span class="muted" style="font-size:13px">' + (selIt ? esc(p.set + " · " + FINISH_LABEL[finish] + " · " + selIt.cond) + (inCart ? " · " + inCart + " en tu carrito" : "") : "Sin stock en este acabado") + '</span><div class="price" style="font-size:26px">' + (unit != null ? money(unit * qty) : "—") + "</div></div>" +
+    langBtns + '<div class="stack" style="gap:8px"><h3 class="lbl">Condición</h3><div class="condlist">' + condRows + "</div></div>" +
+    '<div class="addbox"><div style="flex:1 1 160px"><span class="muted" style="font-size:13px">' + (selIt ? esc(p.set + " · " + FINISH_LABEL[finish] + " · " + selIt.cond + langSuffix(selIt.lang)) + (inCart ? " · " + inCart + " en tu carrito" : "") : "Sin stock en este acabado") + '</span><div class="price" style="font-size:26px">' + (unit != null ? money(unit * qty) : "—") + "</div></div>" +
     '<div class="stepper"><button type="button" data-act="cmQty" data-d="-1" aria-label="Quitar uno">−</button><span class="num">' + qty + '</span><button type="button" data-act="cmQty" data-d="1" aria-label="Agregar uno"' + (qty >= maxQ ? " disabled" : "") + ">+</button></div>" +
     '<button type="button" class="sbtn acc" data-act="cmAdd" data-inv="' + (selIt ? selIt.id : "") + '" data-q="' + qty + '"' + (selIt && maxQ > 0 ? "" : " disabled") + ">" + (maxQ > 0 || !selIt ? "Agregar al carrito" : "Ya tienes todo el stock") + "</button>" +
     '<button type="button" class="sbtn" data-act="wishToggle" data-id="' + p.id + '" aria-pressed="' + wished + '">' + (wished ? ICON.heartFill + "En tu wishlist" : ICON.heart + "Wishlist") + "</button></div>" +
@@ -1520,7 +1558,7 @@ function admInventory(s) {
   var filters = '<div class="invf">' +
     '<label class="field" for="inv-q" style="grid-column:span 2">Buscar<input id="inv-q" type="search" placeholder="Nombre o set…" value="' + esc(ui.invQ) + '" data-input="invQ"></label>' +
     sel("color", "Color", [["all", "Todos"]].concat(Object.keys(COLOR_PAL).map(function (k) { return [k, COLOR_PAL[k].label]; }))) +
-    sel("type", "Tipo", [["all", "Todos"], ["criatura", "Criatura"], ["instantaneo", "Instantáneo"], ["conjuro", "Conjuro"], ["artefacto", "Artefacto"], ["encantamiento", "Encantamiento"], ["tierra", "Tierra"]]) +
+    sel("type", "Tipo", [["all", "Todos"], ["criatura", "Criatura"], ["instantaneo", "Instantáneo"], ["conjuro", "Conjuro"], ["artefacto", "Artefacto"], ["encantamiento", "Encantamiento"], ["tierra", "Tierra"], ["planeswalker", "Planeswalker"], ["otro", "Otro"]]) +
     sel("finish", "Acabado", [["all", "Todos"], ["normal", "Normal"], ["foil", "Foil"], ["etched", "Etched"]]) +
     sel("cond", "Condición", [["all", "Todas"]].concat(CONDS.map(function (c) { return [c, c]; }))) +
     sel("format", "Formato", [["all", "Todos"]].concat(FORMATS)) +
@@ -1551,7 +1589,7 @@ function admInventory(s) {
 function priceModal(s, it) {
   var p = printOf(it.printId), auto = (function () { var c = Object.assign({}, it, { fixed: false }); return unitPrice(s, c); })();
   return '<div class="dlg plat sm"><button class="x" type="button" data-act="closeModal" aria-label="Cerrar">×</button><form class="stack" data-submit="savePrice" data-id="' + it.id + '"><h2 style="font-size:22px">Precio de ' + esc(p.name) + "</h2>" +
-    '<p class="muted" style="margin:0">' + esc(p.set + " · #" + p.num + " · " + FINISH_LABEL[it.finish] + " · " + it.cond) + "</p>" +
+    '<p class="muted" style="margin:0">' + esc(p.set + " · #" + p.num + " · " + FINISH_LABEL[it.finish] + " · " + it.cond + langSuffix(it.lang)) + "</p>" +
     '<p class="hint" style="margin:0">Precio automático: <strong class="mono">' + money(auto) + "</strong></p>" +
     '<label class="field" for="pm-val">Precio manual en MXN (vacío = automático)<input id="pm-val" type="number" min="0" step="0.5" value="' + (it.price != null ? it.price : "") + '" class="mono"></label>' +
     '<div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeModal">Cancelar</button><button type="submit" class="btn pri">Guardar</button></div></form></div>';
@@ -1568,9 +1606,11 @@ function addCardModal(s, m) {
   if (step === "prints") {
     var prints = m.prints || [];
     var grid = m.loading ? '<p class="muted">Buscando versiones…</p>' : prints.length ? '<div class="printgrid">' + prints.map(function (p) {
-      return '<button type="button" class="opt" data-act="acPick" data-id="' + esc(p.id) + '">' + cardImg(p) + '<strong style="font-size:13px">' + esc(p.set) + " · #" + esc(p.num) + '</strong><span class="muted" style="font-size:12px">' + esc(p.setName) + "</span></button>";
+      return '<button type="button" class="opt" data-act="acPick" data-id="' + esc(p.id) + '" data-k="' + esc(norm(p.set + " " + p.num + " " + (p.setName || ""))) + '">' + cardImg(p) + '<strong style="font-size:13px">' + esc(p.set) + " · #" + esc(p.num) + '</strong><span class="muted" style="font-size:12px">' + esc(p.setName) + "</span></button>";
     }).join("") + "</div>" : '<p class="muted">No encontramos versiones.</p>';
-    return head + '<div class="row"><button type="button" class="btn sm" data-act="acBack">Cambiar carta</button><strong>' + esc(m.name) + '</strong><span class="muted">Elige la versión que tienes</span></div>' + grid + "</div></div>";
+    return head + '<div class="row"><button type="button" class="btn sm" data-act="acBack">Cambiar carta</button><strong>' + esc(m.name) + '</strong><span class="muted">Elige la versión que tienes</span></div>' +
+      (!m.loading && prints.length > 8 ? '<div class="row" style="gap:10px;align-items:flex-end"><label class="field" for="ac-pq" style="flex:1 1 240px">Buscar versión<input id="ac-pq" autocomplete="off" placeholder="Set, número o colección (ej. CMM, 410, Commander)" data-input="acPrintQ"></label><span class="muted" id="ac-pcount">' + prints.length + " versiones</span></div>" : "") +
+      grid + "</div></div>";
   }
   var p = m.print, f = m.form || {};
   var fins = p.finishes.map(function (x) { return '<option value="' + x + '"' + (f.fin === x ? " selected" : "") + ">" + FINISH_LABEL[x] + "</option>"; }).join("");
@@ -1768,7 +1808,7 @@ function fmtDay(t) { return new Date(t).toLocaleDateString("es-MX", { day: "nume
 function orderLineRow(i) {
   var pic, name, sub;
   if (i.prodId) { var pr = prodById(i.prodId) || { name: i.name, category: i.category }; pic = '<div class="thumb pthumb">' + prodPic(pr) + "</div>"; name = i.name || pr.name; sub = i.category || pr.category || "Producto"; }
-  else { var p = printOf(i.printId); pic = thumb(p); name = p.name; sub = p.set + " · #" + p.num + " · " + FINISH_LABEL[i.finish] + " · " + i.cond; }
+  else { var p = printOf(i.printId); pic = thumb(p); name = p.name; sub = p.set + " · #" + p.num + " · " + FINISH_LABEL[i.finish] + " · " + i.cond + langSuffix(i.lang); }
   return '<tr><td><div class="row" style="gap:10px;flex-wrap:nowrap">' + pic + '<span style="min-width:0">' + esc(name) + '<br><span class="mono muted" style="font-size:12px">' + esc(sub) + '</span></span></div></td><td class="num" style="text-align:right">' + money(i.unit) + '</td><td class="num" style="text-align:center">' + i.qty + '</td><td class="num" style="text-align:right"><strong>' + money(i.unit * i.qty) + "</strong></td></tr>";
 }
 function orderTable(o) {
@@ -1862,7 +1902,9 @@ function admPricing(s) {
     '' + ckStatusHTML() + '</div>' +
     '<div class="card stack"><h2 style="font-size:18px">Margen y tipo de cambio</h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">' +
     '<label class="field" for="pr-margin">Margen de ganancia (%)<input id="pr-margin" type="number" step="0.5" min="0" max="300" value="' + pr.margin + '" class="mono"></label>' +
+    '<label class="field" for="pr-min">Precio mínimo por carta (MXN)<input id="pr-min" type="number" step="0.5" min="0" value="' + (Number(pr.minPrice) > 0 ? pr.minPrice : "") + '" placeholder="Sin mínimo" class="mono"></label>' +
     '<div class="field">Tipo de cambio en uso<span class="mono" style="font-size:20px;color:var(--ink);padding-top:8px">$' + pr.fx.toFixed(2) + '</span></div></div>' +
+    '<p class="muted" style="margin:0;font-size:13px">Precio mínimo: si después del cálculo una carta queda abajo de este precio, se vende al mínimo. No cambia las cartas con precio fijo. Déjalo vacío para no usar mínimo.</p>' +
     '<p class="muted" style="margin:0;font-size:13px">Este valor convierte a pesos los precios de referencia en dólares.</p></div>' +
     '<div class="card stack"><h2 style="font-size:18px">Precio por condición (% del NM)</h2><div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">' +
     CONDS.map(function (c) { return '<label class="field" for="pr-' + c + '">' + c + '<input id="pr-' + c + '" type="number" min="1" max="100" value="' + pr.cond[c] + '" class="mono"></label>'; }).join("") + "</div></div>" +
@@ -2069,6 +2111,7 @@ var ACT = {
   quickAdd: function (el) { addToCart(el.dataset.inv, 1); },
   cmVersion: function (el) { ui.modal = { type: "card", printId: el.dataset.id, qty: 1 }; renderModal(); },
   cmFinish: function (el) { ui.modal.finish = el.dataset.f; ui.modal.invId = null; ui.modal.qty = 1; renderModal(); },
+  cmLang: function (el) { ui.modal.lang = el.dataset.l; ui.modal.invId = null; ui.modal.qty = 1; renderModal(); },
   cmCond: function (el) { ui.modal.invId = el.dataset.inv; ui.modal.qty = 1; renderModal(); },
   cmQty: function (el) { ui.modal.qty = Math.max(1, (ui.modal.qty || 1) + Number(el.dataset.d)); renderModal(); },
   cmAdd: function (el) { var ok = addToCart(el.dataset.inv, Number(el.dataset.q)); if (ok) { ui.modal.qty = 1; renderModal(); } },
@@ -2157,7 +2200,7 @@ function placeOrder(note) {
   if (bad.length) { toast("Revisa tu carrito: " + bad[0].title + " ya no tiene suficiente stock"); render(); return; }
   var items = lines.map(function (x) {
     if (x.prod) { x.prod.qty -= x.line.qty; return { prodId: x.prod.id, name: x.prod.name, category: x.prod.category, qty: x.line.qty, unit: x.unit }; }
-    x.it.qty -= x.line.qty; return { invId: x.it.id, printId: x.it.printId, finish: x.it.finish, cond: x.it.cond, qty: x.line.qty, unit: x.unit };
+    x.it.qty -= x.line.qty; return { invId: x.it.id, printId: x.it.printId, finish: x.it.finish, cond: x.it.cond, lang: x.it.lang || "EN", qty: x.line.qty, unit: x.unit };
   });
   var o = { id: uid("ord"), storeId: s.id, number: s.nextOrder++, buyer: { id: db.buyer.id, name: db.buyer.name, email: db.buyer.email, phone: db.buyer.phone || "" }, items: items, status: "pendiente", createdAt: Date.now(), note: note || "" };
   o.total = items.reduce(function (a, i) { return a + i.unit * i.qty; }, 0);
@@ -2882,6 +2925,10 @@ var DAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 function pad2(n) { return String(n).padStart(2, "0"); }
 function isoOf(t) { var d = new Date(t); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
 function ago(t) { var m = Math.max(0, Math.round((Date.now() - t) / 60000)); if (m < 60) return "hace " + m + " min"; var h = Math.floor(m / 60); return "hace " + h + " h " + (m % 60) + " min"; }
+var DISC_OPTS = [0, 5, 10, 15, 20, 25, 30, 40, 50, 100];
+function tabLineTotal(l) { var d = Math.min(100, Math.max(0, Number(l.disc) || 0)); return Math.round(l.unit * l.qty * (1 - d / 100) * 100) / 100; }
+function tabDiscount(t) { return Math.round(t.lines.reduce(function (a, l) { return a + (l.unit * l.qty - tabLineTotal(l)); }, 0) * 100) / 100; }
+function discTag(l) { var d = Number(l.disc) || 0; return d > 0 ? ' <span class="pill ok" style="font-size:11px;padding:1px 6px">' + (d === 100 ? "Cortesía" : "−" + d + "%") + "</span>" : ""; }
 function tabSubtotal(t) { return Math.round(t.lines.reduce(function (a, l) { return a + l.unit * l.qty; }, 0) * 100) / 100; }
 function promoLive(p, at) {
   if (!p.active) return false;
@@ -2908,7 +2955,7 @@ function promoSchedule(p) {
 /* Aplica las promociones que más le ahorran al cliente, una por cada paquete o combo completo. */
 function computeTab(t, at) {
   var counts = {}, unitOf = {};
-  t.lines.forEach(function (l) { if (l.kind === "int") { counts[l.refId] = (counts[l.refId] || 0) + l.qty; unitOf[l.refId] = l.unit; } });
+  t.lines.forEach(function (l) { if (l.kind === "int" && !(Number(l.disc) > 0)) { counts[l.refId] = (counts[l.refId] || 0) + l.qty; unitOf[l.refId] = l.unit; } });
   var removed = t.removedPromos || [];
   var all = (db.promos || []).filter(function (p) { return p.storeId === t.storeId && promoLive(p, at); });
   var promos = all.filter(function (p) { return removed.indexOf(p.id) < 0; });
@@ -2926,9 +2973,9 @@ function computeTab(t, at) {
     a.times++; a.saving = Math.round((a.saving + bestSave) * 100) / 100;
   }
   var list = Object.keys(applied).map(function (k) { return applied[k]; });
-  var sub = tabSubtotal(t), save = list.reduce(function (a, x) { return a + x.saving; }, 0);
+  var sub = tabSubtotal(t), disc = tabDiscount(t), save = list.reduce(function (a, x) { return a + x.saving; }, 0);
   var removedLive = all.filter(function (p) { return removed.indexOf(p.id) >= 0; });
-  return { subtotal: sub, applied: list, saving: Math.round(save * 100) / 100, total: Math.round((sub - save) * 100) / 100, removed: removedLive };
+  return { subtotal: sub, discount: disc, applied: list, saving: Math.round(save * 100) / 100, total: Math.round((sub - disc - save) * 100) / 100, removed: removedLive };
 }
 function tabPaid(t) { return (t.payments || []).reduce(function (a, p) { return a + Number(p.amount || 0); }, 0); }
 function clientById(id) { return (db.clients || []).filter(function (c) { return c.id === id; })[0]; }
@@ -3043,7 +3090,8 @@ function admTabDetail(s, t) {
     var kindLbl = { int: "Consumo", other: "Otro", card: "Carta", prod: "Producto" }[l.kind];
     return '<tr><td><strong>' + esc(l.name) + '</strong><br><span class="muted" style="font-size:12px">' + kindLbl + " · " + new Date(l.at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" }) + '</span></td><td class="num" style="text-align:right">' + money(l.unit) + "</td>" +
       '<td><div class="qstep"><button type="button" data-act="tabQty" data-id="' + l.id + '" data-d="-1" aria-label="Quitar uno">−</button><span class="num">' + l.qty + '</span><button type="button" data-act="tabQty" data-id="' + l.id + '" data-d="1" aria-label="Agregar uno">+</button></div></td>' +
-      '<td class="num" style="text-align:right"><strong>' + money(l.unit * l.qty) + '</strong></td><td><button type="button" class="icon-btn" data-act="tabDelLine" data-id="' + l.id + '" aria-label="Quitar ' + esc(l.name) + '">×</button></td></tr>';
+      '<td><label class="sr" for="dc-' + l.id + '">Descuento de ' + esc(l.name) + '</label><select id="dc-' + l.id + '" class="dsel" data-change="tabDisc" data-id="' + l.id + '">' + DISC_OPTS.concat(DISC_OPTS.indexOf(Number(l.disc) || 0) < 0 ? [Number(l.disc)] : []).map(function (d) { return '<option value="' + d + '"' + ((Number(l.disc) || 0) === d ? " selected" : "") + ">" + (d === 0 ? "Sin descuento" : d === 100 ? "Cortesía (100%)" : d + "%") + "</option>"; }).join("") + "</select></td>" +
+      '<td class="num" style="text-align:right">' + (Number(l.disc) > 0 ? '<s class="muted" style="font-size:12px">' + money(l.unit * l.qty) + "</s><br>" : "") + "<strong>" + money(tabLineTotal(l)) + '</strong></td><td><button type="button" class="icon-btn" data-act="tabDelLine" data-id="' + l.id + '" aria-label="Quitar ' + esc(l.name) + '">×</button></td></tr>';
   }).join("");
   var promoRows = r.applied.map(function (a) { return '<div class="sumrow ok"><span>' + esc(a.name) + (a.times > 1 ? " × " + a.times : "") + "</span><span>−" + money(a.saving) + "</span></div>"; }).join("");
   var c = t.clientId && clientById(t.clientId);
@@ -3052,10 +3100,10 @@ function admTabDetail(s, t) {
     '<div class="split"><section class="a" style="max-width:520px"><div class="card stack"><h2 style="font-size:16px">Agregar consumo</h2><div class="quickgrid">' + items + "</div>" +
     '<div class="row" style="gap:8px"><button type="button" class="btn" data-act="tabOther">+ Otro (nombre y precio)</button><button type="button" class="btn" data-act="tabStock">+ Carta o producto de la tienda</button></div>' +
     '<p class="muted" style="margin:0;font-size:12px">Cada toque suma uno. Las promociones se aplican solas al cerrar la cuenta.</p></div></section>' +
-    '<section class="b"><div class="tbl-box"><table class="tbl" style="min-width:540px"><thead><tr><th>Artículo</th><th style="text-align:right">Precio</th><th>Cantidad</th><th style="text-align:right">Total</th><th></th></tr></thead><tbody>' +
-    (lines || '<tr><td colspan="5" class="muted" style="text-align:center;padding:24px">Toca un artículo para agregarlo.</td></tr>') + "</tbody></table></div>" +
-    '<div class="card sumbox"><div class="sumrow"><span>Subtotal</span><span>' + money(r.subtotal) + "</span></div>" + promoRows +
-    '<div class="sumrow total"><span>Total' + (r.saving ? " con promociones" : "") + "</span><span>" + money(r.total) + "</span></div></div></section></div>";
+    '<section class="b"><div class="tbl-box"><table class="tbl" style="min-width:640px"><thead><tr><th>Artículo</th><th style="text-align:right">Precio</th><th>Cantidad</th><th>Descuento</th><th style="text-align:right">Total</th><th></th></tr></thead><tbody>' +
+    (lines || '<tr><td colspan="6" class="muted" style="text-align:center;padding:24px">Toca un artículo para agregarlo.</td></tr>') + "</tbody></table></div>" +
+    '<div class="card sumbox"><div class="sumrow"><span>Subtotal</span><span>' + money(r.subtotal) + "</span></div>" + (r.discount ? '<div class="sumrow ok"><span>Descuentos</span><span>−' + money(r.discount) + "</span></div>" : "") + promoRows +
+    '<div class="sumrow total"><span>Total' + (r.saving || r.discount ? " con descuentos" : "") + "</span><span>" + money(r.total) + "</span></div></div></section></div>";
 }
 function tabNewModal(m) {
   var s = curStore(), cl = clientsOf(s).slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
@@ -3077,7 +3125,7 @@ function tabOtherModal() {
 function tabStockList(q) {
   var s = curStore(); q = norm(q || "");
   var rows = [];
-  invOf(s.id).forEach(function (i) { if (i.qty <= 0) return; var p = printOf(i.printId); if (q && norm(p.name + " " + p.set).indexOf(q) < 0) return; rows.push({ key: "card:" + i.id, name: p.name, sub: p.set + " · " + FINISH_LABEL[i.finish] + " · " + i.cond, price: unitPrice(s, i), stock: i.qty, pic: thumb(p) }); });
+  invOf(s.id).forEach(function (i) { if (i.qty <= 0) return; var p = printOf(i.printId); if (q && norm(p.name + " " + p.set).indexOf(q) < 0) return; rows.push({ key: "card:" + i.id, name: p.name, sub: p.set + " · " + FINISH_LABEL[i.finish] + " · " + i.cond + langSuffix(i.lang), price: unitPrice(s, i), stock: i.qty, pic: thumb(p) }); });
   prodsOf(s.id).forEach(function (p) { if (p.qty <= 0) return; if (q && norm(p.name + " " + p.category).indexOf(q) < 0) return; rows.push({ key: "prod:" + p.id, name: p.name, sub: p.category, price: Number(p.price), stock: p.qty, pic: '<div class="thumb pthumb">' + prodPic(p) + "</div>" }); });
   rows = rows.slice(0, 40);
   return rows.length ? rows.map(function (r) { return '<div class="stockrow">' + r.pic + '<span style="flex:1;min-width:0"><strong>' + esc(r.name) + '</strong><br><span class="muted mono" style="font-size:12px">' + esc(r.sub) + " · " + r.stock + ' disp.</span></span><span class="num">' + money(r.price) + '</span><button type="button" class="btn sm pri" data-act="tabAddStock" data-key="' + r.key + '">Agregar</button></div>'; }).join("") : '<p class="muted">Sin resultados con existencia.</p>';
@@ -3093,13 +3141,13 @@ function tabCloseModal(m) {
     r.removed.map(function (p) { return '<div class="sumrow muted"><span><s>' + esc(p.name) + '</s> <button type="button" class="linkbtn" data-act="tabPromoOn" data-id="' + p.id + '" style="font-size:12px">volver a aplicar</button></span><span></span></div>'; }).join("");
   var editable = m.step !== "confirm";
   var lines = t.lines.map(function (l, i) {
-    if (!editable) return '<div class="sumrow"><span>' + l.qty + " × " + esc(l.name) + '</span><span class="num">' + money(l.unit * l.qty) + "</span></div>";
+    if (!editable) return '<div class="sumrow"><span>' + l.qty + " × " + esc(l.name) + discTag(l) + '</span><span class="num">' + money(tabLineTotal(l)) + "</span></div>";
     return '<div class="tcline"><span class="tcname">' + l.qty + " × " + esc(l.name) + (l.origUnit != null && l.origUnit !== l.unit ? ' <s class="muted">' + money(l.origUnit) + "</s>" : "") + "</span>" +
       '<label class="tcprice">$<input type="number" min="0" step="0.5" inputmode="decimal" class="mono" value="' + l.unit + '" data-change="tabLinePrice" data-i="' + i + '" aria-label="Precio unitario de ' + esc(l.name) + '"></label>' +
-      '<span class="num">' + money(l.unit * l.qty) + "</span></div>";
+      '<span class="num">' + money(tabLineTotal(l)) + discTag(l) + "</span></div>";
   }).join("") + (editable ? '<p class="muted" style="margin:2px 0 6px;font-size:12px">Puedes cambiar el precio unitario de cada producto antes de cobrar.</p>' : "");
   var head = '<div class="dlg plat sm"><button class="x" type="button" data-act="closeModal" aria-label="Cerrar">×</button><div class="stack"><h2 style="font-size:22px">Cerrar cuenta · ' + esc(tabName(t)) + "</h2>" +
-    '<div class="card sumbox" style="padding:14px">' + lines + '<div class="sumrow" style="border-top:1px solid var(--line);padding-top:6px"><span>Subtotal</span><span>' + money(r.subtotal) + "</span></div>" + promoRows + '<div class="sumrow total"><span>Total a cobrar</span><span>' + money(r.total) + "</span></div></div>";
+    '<div class="card sumbox" style="padding:14px">' + lines + '<div class="sumrow" style="border-top:1px solid var(--line);padding-top:6px"><span>Subtotal</span><span>' + money(r.subtotal) + "</span></div>" + (r.discount ? '<div class="sumrow ok"><span>Descuentos</span><span>−' + money(r.discount) + "</span></div>" : "") + promoRows + '<div class="sumrow total"><span>Total a cobrar</span><span>' + money(r.total) + "</span></div></div>";
   if (m.step === "confirm") {
     var paid = Math.min(d.amount, r.total), change = Math.max(0, d.amount - r.total), owe = Math.max(0, r.total - d.amount);
     var who = c || clientById(d.clientId);
@@ -3157,7 +3205,7 @@ function admClientDetail(s, c) {
     var r = t.status === "cerrada" ? { subtotal: t.subtotal, applied: t.applied || [], total: t.total } : computeTab(t), paid = tabPaid(t);
     return '<details class="order"><summary><strong>' + (t.status === "abierta" ? "Cuenta abierta" : "Consumo del " + fmtDay(t.closedAt)) + '</strong><span class="muted" style="flex:1 1 160px;font-size:13px">' + t.lines.reduce(function (a, l) { return a + l.qty; }, 0) + " artículos" + (r.applied.length ? " · con promoción" : "") + "</span>" +
       (t.status === "abierta" ? '<span class="pill warn">Abierta</span>' : (r.total - paid > 0.005 ? '<span class="pill bad">Debe ' + money(r.total - paid) + "</span>" : '<span class="pill ok">Pagada</span>')) + '<strong class="num">' + money(r.total) + "</strong></summary>" +
-      '<div class="body"><div class="tbl-box"><table class="tbl" style="min-width:420px"><tbody>' + t.lines.map(function (l) { return "<tr><td>" + esc(l.name) + '</td><td class="num" style="text-align:right">' + money(l.unit) + '</td><td class="num" style="text-align:center">' + l.qty + '</td><td class="num" style="text-align:right">' + money(l.unit * l.qty) + "</td></tr>"; }).join("") +
+      '<div class="body"><div class="tbl-box"><table class="tbl" style="min-width:420px"><tbody>' + t.lines.map(function (l) { return "<tr><td>" + esc(l.name) + discTag(l) + '</td><td class="num" style="text-align:right">' + money(l.unit) + '</td><td class="num" style="text-align:center">' + l.qty + '</td><td class="num" style="text-align:right">' + money(tabLineTotal(l)) + "</td></tr>"; }).join("") +
       (r.applied || []).map(function (a) { return '<tr><td colspan="3" style="color:var(--ok)">' + esc(a.name) + (a.times > 1 ? " × " + a.times : "") + '</td><td class="num" style="text-align:right;color:var(--ok)">−' + money(a.saving) + "</td></tr>"; }).join("") + "</tbody></table></div>" +
       (t.status === "abierta" ? '<button type="button" class="btn sm pri" data-act="tabOpen" data-id="' + t.id + '" style="align-self:flex-start">Ir a la cuenta</button>' : "") + "</div></details>";
   }).join("");
@@ -3308,7 +3356,7 @@ Object.assign(ACT, {
   tabStock: function () { openModal({ type: "tabStock", q: "" }); },
   tabAddStock: function (el) {
     var t = curTab(), s = curStore(), k = el.dataset.key.split(":");
-    if (k[0] === "card") { var it = db.inventory.filter(function (i) { return i.id === k[1]; })[0]; if (!it || it.qty <= 0) return; var p = printOf(it.printId); it.qty -= 1; addTabLine(t, "card", it.id, p.name + " (" + p.set + " · " + FINISH_LABEL[it.finish] + " · " + it.cond + ")", unitPrice(s, it), 1); toast("+1 " + p.name); }
+    if (k[0] === "card") { var it = db.inventory.filter(function (i) { return i.id === k[1]; })[0]; if (!it || it.qty <= 0) return; var p = printOf(it.printId); it.qty -= 1; addTabLine(t, "card", it.id, p.name + " (" + p.set + " · " + FINISH_LABEL[it.finish] + " · " + it.cond + langSuffix(it.lang) + ")", unitPrice(s, it), 1); toast("+1 " + p.name); }
     else { var pr = prodById(k[1]); if (!pr || pr.qty <= 0) return; pr.qty -= 1; addTabLine(t, "prod", pr.id, pr.name, Number(pr.price), 1); toast("+1 " + pr.name); }
     saveDB(); render();
   },
@@ -3418,6 +3466,7 @@ Object.assign(SUBMIT, {
   savePricing: function (f) {
     var s = curStore(), pr = s.pricing;
     pr.margin = Math.max(0, Number(f.querySelector("#pr-margin").value) || 0);
+    var mnEl = f.querySelector("#pr-min"); if (mnEl) pr.minPrice = Math.max(0, Number(mnEl.value) || 0);
     CONDS.forEach(function (c) { pr.cond[c] = Math.min(100, Math.max(1, Number(f.querySelector("#pr-" + c).value) || pr.cond[c])); });
     saveDB(); render(); toast("Precios recalculados");
   }
@@ -3454,7 +3503,7 @@ db.stores.forEach(function (st) { if (st.pricing.fxMode === "fixadj") { st.prici
 /* ===================== Ronda 9: Historial de cambios ===================== */
 db.audit = db.audit || [];
 function findInv(id) { return db.inventory.filter(function (i) { return i.id === id; })[0]; }
-function invLabel(it) { var p = it && printOf(it.printId); return p ? p.name + " (" + p.set + " · " + FINISH_LABEL[it.finish] + " · " + it.cond + ")" : "carta"; }
+function invLabel(it) { var p = it && printOf(it.printId); return p ? p.name + " (" + p.set + " · " + FINISH_LABEL[it.finish] + " · " + it.cond + langSuffix(it.lang) + ")" : "carta"; }
 function g1(id) { var el = document.getElementById(id); return el ? el.value : ""; }
 function tabLbl(id) { var t = tabOf(id); return t ? tabName(t) : "cliente"; }
 function lineOf(tabId, lineId) { var t = tabOf(tabId); return t && t.lines.filter(function (l) { return l.id === lineId; })[0]; }
@@ -3893,6 +3942,22 @@ render = function () {
   return r;
 };
 
+Object.assign(CHANGE, {
+  tabDisc: function (el) {
+    var t = curTab(), l = t && t.lines.filter(function (x) { return x.id === el.dataset.id; })[0]; if (!l) return;
+    var d = Math.min(100, Math.max(0, Number(el.value) || 0)), old = Number(l.disc) || 0; if (d === old) return;
+    l.disc = d;
+    auditLog(t.storeId, "Cuentas abiertas", (d ? "Aplicó " + (d === 100 ? "cortesía (100%)" : d + "% de descuento") + " a «" + l.name + "»" : "Quitó el descuento de «" + l.name + "»") + " en la cuenta de " + tabName(t), tabAuditUser());
+    saveDB(); render(); toast(d ? "Descuento aplicado: " + (d === 100 ? "cortesía" : d + "%") : "Descuento quitado");
+  }
+});
+Object.assign(INPUT, {
+  acPrintQ: function (el) {
+    var q = norm(el.value.trim()), n = 0;
+    Array.prototype.forEach.call(document.querySelectorAll(".printgrid .opt"), function (b) { var ok = !q || (b.dataset.k || "").indexOf(q) >= 0; b.hidden = !ok; if (ok) n++; });
+    var c = document.getElementById("ac-pcount"); if (c) c.textContent = n + (n === 1 ? " versión" : " versiones");
+  }
+});
 window.addEventListener("hashchange", function () { applyRoute(); });
 db.stores.forEach(function (x) { if (x.pricing.fxMode !== "manual") { x.pricing.fxMode = "manual"; x.pricing.fx = x.pricing.manualFx || x.pricing.fx; } });
 if (!db.blankDone) { (function () { var s = db.stores.filter(function (x) { return x.id === "store-dr"; })[0] || db.stores[0]; db.stores = [s]; ["inventory","products","orders","events","payments","internal","promos","clients","tabs","clientPays","audit"].forEach(function (k) { db[k] = []; }); db.carts = {}; db.wishlists = {}; db.wishMeta = {}; db.buyerInfo = {}; db.buyer = null; db.wishSeeded = true; s.categories = []; s.nextOrder = 1001; s.theme.slides = []; s.adminEmail = ""; s.info.address = ""; s.info.whatsapp = ""; s.info.hours = ""; db.blankDone = true; })(); }
@@ -3928,7 +3993,7 @@ var G_ICON = '<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"
 function fbStore() { return db.stores[0]; }
 function fbRefs() {
   var t = fdb.collection("tiendas").doc(FB_SLUG);
-  return { pub: t, priv: t.collection("privado").doc("datos"), acc: t.collection("acceso").doc("admins"), cnt: t.collection("contador").doc("pedidos"), ped: t.collection("pedidos"), cli: t.collection("clientes"), img: t.collection("imagenes") };
+  return { pub: t, priv: t.collection("privado").doc("datos"), acc: t.collection("acceso").doc("admins"), cnt: t.collection("contador").doc("pedidos"), ped: t.collection("pedidos"), cli: t.collection("clientes"), img: t.collection("imagenes"), parts: t.collection("partes") };
 }
 function fbErr(e) {
   try { console.warn("[firebase]", e && (e.code || e.message) || e); } catch (x) {}
@@ -3975,14 +4040,50 @@ function fbUnpack(json, cb) {
     cb(JSON.parse(json, function (k, v) { return typeof v === "string" && v.indexOf("fbimg:") === 0 ? (FB.imgs[v.slice(6)] || "") : v; }));
   });
 }
-function fbOnPub(snap, admin) {
+/* ---- Inventario y catálogo repartidos en varios documentos: cada documento de Firestore admite 1 MB ---- */
+FB.parts = {}; FB.main = null; FB.lastPart = {}; FB.partN = 1; FB.lastSig = null;
+function fbBucket(id, n) { var h = 0; id = String(id); for (var i = 0; i < id.length; i++) h = (Math.imul(h, 31) + id.charCodeAt(i)) >>> 0; return h % n; }
+function fbMainData() { return { store: fbStore(), products: db.products || [], events: db.events || [] }; }
+function fbSplit() {
+  var d = fbPubData(), n = Math.max(1, FB.partN || 1), out;
+  var total = JSON.stringify(d.inventory).length + JSON.stringify(d.catalog).length;
+  n = Math.max(n, Math.ceil(total / 600000));
+  for (var tries = 0; tries < 6; tries++) {
+    var b = []; for (var i = 0; i < n; i++) b.push({ inventory: [], catalog: {} });
+    d.inventory.forEach(function (it) { b[fbBucket(it.printId, n)].inventory.push(it); });
+    Object.keys(d.catalog).forEach(function (id) { b[fbBucket(id, n)].catalog[id] = d.catalog[id]; });
+    out = b.map(function (x, i) { var j = JSON.stringify(x); return { id: "p" + i, json: j, h: fbHash(j) }; });
+    if (out.every(function (x) { return x.json.length < 900000; })) break;
+    n = n * 2;
+  }
+  FB.partN = n;
+  return out;
+}
+function fbOnMain(snap, admin) {
   if (!snap.exists) { if (admin) { FB.pubOK = true; fbFlush(); } return; }
-  var j = snap.data().json; if ((FB.pubOK || !admin) && j === FB.lastPub) return;
-  FB.lastPub = j; var seq = ++FB.pubSeq;
-  fbUnpack(j, function (d) {
+  FB.main = snap.data(); fbAssemble(admin);
+}
+function fbOnParts(qs, admin) {
+  qs.forEach(function (d) { var x = d.data(); FB.parts[d.id] = x; if (admin) FB.lastPart[d.id] = x.h; });
+  fbAssemble(admin);
+}
+/* Se arma la tienda solo cuando llegaron todas las partes que indica el documento principal. */
+function fbAssemble(admin) {
+  var m = FB.main; if (!m) return;
+  var list = m.parts || null;
+  if (list && !list.every(function (p) { return FB.parts[p.id] && FB.parts[p.id].h === p.h; })) return;
+  var sig = m.json + "|" + (list ? list.map(function (p) { return p.h; }).join(",") : "old");
+  if ((FB.pubOK || !admin) && sig === FB.lastSig) return;
+  FB.lastSig = sig; FB.lastPub = m.json; if (list) FB.partN = Math.max(FB.partN || 1, list.length);
+  var seq = ++FB.pubSeq;
+  fbUnpack(m.json, function (d) {
     if (seq !== FB.pubSeq) return;
+    if (list) {
+      d.inventory = []; d.catalog = {};
+      list.forEach(function (p) { var x = JSON.parse(FB.parts[p.id].json); d.inventory = d.inventory.concat(x.inventory || []); Object.keys(x.catalog || {}).forEach(function (k) { d.catalog[k] = x.catalog[k]; }); });
+    }
     fbApplyPub(d);
-    if (admin) { FB.pubOK = true; fbApplyStock(); }
+    if (admin) { FB.pubOK = true; fbApplyStock(); if (!list) setTimeout(fbFlush, 600); /* formato anterior: se pasa al nuevo */ }
     render();
   });
 }
@@ -4001,24 +4102,34 @@ function fbFlush() {
   var r = fbRefs(), now = Date.now();
   if (FB.admin) {
     if (!FB.pubOK || !FB.privOK) return;
-    var pk = fbPack(fbPubData()), pj = pk.json;
-    if (pj !== FB.lastPub) {
-      if (pj.length > 1000000) { toast("Se llenó el espacio de datos de la tienda: no se pudo guardar este cambio."); }
+    var pk = fbPack(fbMainData()), pj = pk.json, parts = fbSplit();
+    var sig = pj + "|" + parts.map(function (x) { return x.h; }).join(",");
+    if (sig !== FB.lastSig) {
+      if (pj.length > 1000000) { toast("Los datos de la tienda (banners, eventos, productos) son demasiados: no se pudo guardar este cambio."); }
       else {
-        var prevRefs = fbRefsIn(FB.lastPub); FB.lastPub = pj;
+        var prevRefs = fbRefsIn(FB.lastPub); FB.lastPub = pj; FB.lastSig = sig;
         var known = FB.imgKnown || (FB.imgKnown = {});
         prevRefs.forEach(function (id) { known[id] = 1; });
         var ups = pk.refs.filter(function (id) { return !known[id]; }).map(function (id) {
           if (FB.imgs[id].length > 1000000) return Promise.reject({ code: "too-big" });
           return r.img.doc(id).set({ data: FB.imgs[id], at: now }).then(function () { known[id] = 1; });
         });
+        var changed = parts.filter(function (x) { return FB.lastPart[x.id] !== x.h; });
         Promise.all(ups).then(function () {
-          return r.pub.set({ json: pj, at: now }).then(function () {
+          var groups = [], cur = [], size = 0;
+          changed.forEach(function (x) { if (cur.length && size + x.json.length > 6000000) { groups.push(cur); cur = []; size = 0; } cur.push(x); size += x.json.length; });
+          if (cur.length) groups.push(cur);
+          var chain = Promise.resolve();
+          groups.forEach(function (g) { chain = chain.then(function () { var bt = fdb.batch(); g.forEach(function (x) { bt.set(r.parts.doc(x.id), { json: x.json, h: x.h, at: now }); }); return bt.commit(); }); });
+          return chain.then(function () {
+            changed.forEach(function (x) { FB.lastPart[x.id] = x.h; });
+            return r.pub.set({ json: pj, parts: parts.map(function (x) { return { id: x.id, h: x.h }; }), at: now });
+          }).then(function () {
             prevRefs.forEach(function (id) { if (pk.refs.indexOf(id) < 0) { delete known[id]; r.img.doc(id).delete().catch(function () {}); } });
           });
         }).catch(function (e) {
-          fbErr(e); FB.lastPub = null;
-          toast(e && e.code === "too-big" ? "La imagen es demasiado pesada. Usa una más ligera." : "No se pudo guardar el cambio. Revisa tu conexión e inténtalo de nuevo.");
+          fbErr(e); FB.lastPub = null; FB.lastSig = null;
+          toast(e && e.code === "too-big" ? "La imagen es demasiado pesada. Usa una más ligera." : e && e.code === "permission-denied" ? "No se pudo guardar: falta actualizar las reglas de Firebase." : "No se pudo guardar el cambio. Revisa tu conexión e inténtalo de nuevo.");
         });
       }
     }
@@ -4065,7 +4176,8 @@ function fbCheckAdmin(u) {
 function fbAdminOK() {
   FB.admin = true; fbGate(null);
   var r = fbRefs();
-  r.pub.onSnapshot(function (snap) { fbOnPub(snap, true); }, fbErr);
+  r.pub.onSnapshot(function (snap) { fbOnMain(snap, true); }, fbErr);
+  r.parts.onSnapshot(function (qs) { fbOnParts(qs, true); }, fbErr);
   r.priv.onSnapshot(function (snap) {
     if (!snap.exists) { FB.privOK = true; fbMergeAllClients(); fbFlush(); return; }
     var j = snap.data().json; if (FB.privOK && j === FB.lastPriv) return;
@@ -4213,7 +4325,7 @@ placeOrder = function (note) {
   if (!db.buyer.phone) { FB.then = { act: "checkout", note: note }; fbAskPhone(); return; }
   var items = lines.map(function (x) {
     if (x.prod) return { prodId: x.prod.id, name: x.prod.name, category: x.prod.category, qty: x.line.qty, unit: x.unit };
-    return { invId: x.it.id, printId: x.it.printId, finish: x.it.finish, cond: x.it.cond, qty: x.line.qty, unit: x.unit };
+    return { invId: x.it.id, printId: x.it.printId, finish: x.it.finish, cond: x.it.cond, lang: x.it.lang || "EN", qty: x.line.qty, unit: x.unit };
   });
   var r = fbRefs(), b = db.buyer;
   toast("Enviando tu pedido…");
@@ -4255,7 +4367,8 @@ function fbBoot() {
     firebase.initializeApp(FB_CONFIG);
     fauth = firebase.auth(); fdb = firebase.firestore();
     if (APP_MODE !== "panel") {
-      fbRefs().pub.onSnapshot(function (snap) { fbOnPub(snap, false); }, fbErr);
+      fbRefs().pub.onSnapshot(function (snap) { fbOnMain(snap, false); }, fbErr);
+      fbRefs().parts.onSnapshot(function (qs) { fbOnParts(qs, false); }, fbErr);
     }
     fauth.onAuthStateChanged(function (u) {
       if (APP_MODE === "panel") { if (!u) { FB.user = null; FB.admin = false; fbGate("login"); return; } FB.user = u; fbCheckAdmin(u); return; }
