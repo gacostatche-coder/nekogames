@@ -1579,7 +1579,7 @@ function admInventory(s) {
         : '<button type="button" class="btn sm danger" data-act="invDelAsk" data-id="' + i.id + '">Eliminar</button>') + "</td></tr>";
   }).join("");
   return '<div class="head"><div><h1>Inventario de cartas</h1><p class="muted" style="margin:0">El precio de plataforma es el que traemos de ' + srcLabel + '. El precio en tienda aplica tu ganancia de ' + pr.margin + "%, el tipo de cambio de $" + pr.fx + " y el % de cada condición. Lo cambias en <button type=\"button\" class=\"linkbtn\" data-act=\"adminTab\" data-tab=\"precios\">Precios y margen</button>.</p></div>" +
-    '<button type="button" class="btn pri" data-act="addCard">Agregar carta</button></div>' +
+    '<div class="row" style="gap:8px"><button type="button" class="btn" data-act="invCsv">Descargar CSV</button><button type="button" class="btn pri" data-act="addCard">Agregar carta</button></div></div>' +
     '<div class="kpis"><div class="kpi"><span>Cartas en stock</span><strong>' + totalQty + '</strong></div><div class="kpi"><span>Valor de inventario</span><strong>' + money(value) + '</strong></div><div class="kpi"><span>Con precio fijo</span><strong>' + nFixed + "</strong></div></div>" +
     '<div id="inv-table" class="stack" style="gap:12px">' + filters +
     '<div id="inv-results" class="stack" style="gap:12px"><span class="muted" style="font-size:13px">' + list.length + (list.length === 1 ? " resultado" : " resultados") + "</span>" +
@@ -3176,20 +3176,20 @@ function admClients(s) {
   if (ui.clientId) { var c = clientById(ui.clientId); if (c) return admClientDetail(s, c); ui.clientId = null; }
   return '<div class="head"><div><h1>Clientes</h1><p class="muted" style="margin:0">Todos tus clientes: los que compran en línea y los que das de alta en la tienda. Toca uno para ver su estado de cuenta.</p></div><button type="button" class="btn pri" data-act="clientNew">Nuevo cliente</button></div>' +
     '<div class="invf" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))"><label class="field" for="cl-q" style="grid-column:span 2">Buscar<input id="cl-q" type="search" placeholder="Nombre, teléfono o correo" value="' + esc(ui.clQ || "") + '" data-input="clQ"></label>' +
-    '<label class="field" for="cl-f">Mostrar<select id="cl-f" data-change="clF"><option value="all"' + (ui.clF === "debt" ? "" : " selected") + '>Todos</option><option value="debt"' + (ui.clF === "debt" ? " selected" : "") + ">Con saldo pendiente</option></select></label></div>" +
-    '<div id="cl-results">' + clientRows(s) + "</div>";
+    '<label class="field" for="cl-f">Mostrar<select id="cl-f" data-change="clF"><option value="all"' + (ui.clF === "debt" ? "" : " selected") + '>Todos</option><option value="debt"' + (ui.clF === "debt" ? " selected" : "") + ">Con saldo pendiente</option></select></label>" + clRangeFields() + "</div>" +
+    clKpisHTML(s) + '<div id="cl-results">' + clientRows(s) + "</div>";
 }
 function clientRows(s) {
-  var q = norm(ui.clQ || ""), list = clientsOf(s).map(function (c) { return { c: c, bal: clientBalance(c), last: clientLast(c), open: clientTabs(c).some(function (t) { return t.status === "abierta"; }) }; })
-    .filter(function (x) { return (!q || norm(x.c.name + " " + (x.c.phone || "") + " " + (x.c.email || "")).indexOf(q) >= 0) && (ui.clF !== "debt" || x.bal > 0.005); })
+  var q = norm(ui.clQ || ""), rg = clRange(), list = clientsOf(s).map(function (c) { var t = clientPeriod(c, rg); return { c: c, bal: t.bal, total: t.charge, paid: t.pay, moves: t.moves, last: clientLast(c), open: clientTabs(c).some(function (t) { return t.status === "abierta"; }) }; })
+    .filter(function (x) { return (!q || norm(x.c.name + " " + (x.c.phone || "") + " " + (x.c.email || "")).indexOf(q) >= 0) && (ui.clF !== "debt" || x.bal > 0.005) && (!rg.on || x.moves > 0 || (x.c.createdAt >= rg.from && x.c.createdAt <= rg.to) || (ui.clF === "debt" && x.bal > 0.005)); })
     .sort(function (a, b) { return (b.bal > 0) - (a.bal > 0) || b.last - a.last; });
   var totalDebt = list.reduce(function (a, x) { return a + Math.max(0, x.bal); }, 0);
   return '<p class="muted" style="margin:0 0 8px;font-size:13px">' + list.length + (list.length === 1 ? " cliente" : " clientes") + " · por cobrar " + money(totalDebt) + "</p>" +
-    '<div class="tbl-box"><table class="tbl" style="min-width:820px"><thead><tr><th>Cliente</th><th>Teléfono</th><th>Correo</th><th>Origen</th><th style="text-align:right">Saldo</th><th>Última actividad</th><th></th></tr></thead><tbody>' +
+    '<div class="tbl-box"><table class="tbl" style="min-width:1000px"><thead><tr><th>Cliente</th><th>Teléfono</th><th>Correo</th><th>Origen</th><th style="text-align:right">Total' + (rg.on ? " del periodo" : "") + '</th><th style="text-align:right">Pagado' + (rg.on ? " del periodo" : "") + '</th><th style="text-align:right">Saldo actual</th><th>Última actividad</th><th></th></tr></thead><tbody>' +
     (list.map(function (x) {
       return '<tr><td><button type="button" class="linkbtn" data-act="clientOpen" data-id="' + x.c.id + '" style="font-weight:600;text-decoration:none">' + esc(x.c.name) + "</button>" + (x.open ? ' <span class="pill warn">cuenta abierta</span>' : "") + '</td><td class="mono" style="font-size:13px">' + esc(x.c.phone || "—") + '</td><td style="font-size:13px">' + esc(x.c.email || "—") + "</td>" +
-        '<td><span class="pill ' + (x.c.source === "online" ? "brand" : "neu") + '">' + (x.c.source === "online" ? "En línea" : "En tienda") + '</span></td><td class="num" style="text-align:right;font-weight:600;color:' + (x.bal > 0.005 ? "var(--bad)" : "inherit") + '">' + money(x.bal) + '</td><td class="muted" style="font-size:13px">' + fmtDay(x.last) + '</td><td><button type="button" class="btn sm" data-act="clientOpen" data-id="' + x.c.id + '">Ver</button></td></tr>';
-    }).join("") || '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">Sin resultados.</td></tr>') + "</tbody></table></div>";
+        '<td><span class="pill ' + (x.c.source === "online" ? "brand" : "neu") + '">' + (x.c.source === "online" ? "En línea" : "En tienda") + '</span></td><td class="num" style="text-align:right">' + money(x.total) + '</td><td class="num" style="text-align:right;color:var(--ok)">' + money(x.paid) + '</td><td class="num" style="text-align:right;font-weight:600;color:' + (x.bal > 0.005 ? "var(--bad)" : "inherit") + '">' + money(x.bal) + '</td><td class="muted" style="font-size:13px">' + fmtDay(x.last) + '</td><td><button type="button" class="btn sm" data-act="clientOpen" data-id="' + x.c.id + '">Ver</button></td></tr>';
+    }).join("") || '<tr><td colspan="9" class="muted" style="text-align:center;padding:24px">Sin resultados.</td></tr>') + "</tbody></table></div>";
 }
 function admClientDetail(s, c) {
   var mv = clientLedger(c), charges = mv.reduce(function (a, m) { return a + (m.charge || 0); }, 0), pays = mv.reduce(function (a, m) { return a + (m.pay || 0); }, 0), bal = Math.round((charges - pays) * 100) / 100;
@@ -3958,6 +3958,77 @@ Object.assign(INPUT, {
     var c = document.getElementById("ac-pcount"); if (c) c.textContent = n + (n === 1 ? " versión" : " versiones");
   }
 });
+
+/* Ronda 13: CSV del inventario y KPI / periodo en Clientes */
+function csvCell(v) { v = String(v == null ? "" : v); return /[",\n;]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+function downloadText(name, text, type) {
+  var blob = new Blob(["﻿" + text], { type: type || "text/csv;charset=utf-8" });
+  var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+function isoDay(d) { var z = function (n) { return (n < 10 ? "0" : "") + n; }; return d.getFullYear() + "-" + z(d.getMonth() + 1) + "-" + z(d.getDate()); }
+/* Periodo de Clientes: preset o fechas propias. */
+function clRange() {
+  var r = ui.clRange || { preset: "all" }, now = new Date(), from = null, to = null;
+  if (r.preset === "month") { from = new Date(now.getFullYear(), now.getMonth(), 1); }
+  else if (r.preset === "lastmonth") { from = new Date(now.getFullYear(), now.getMonth() - 1, 1); to = new Date(now.getFullYear(), now.getMonth(), 0); }
+  else if (r.preset === "30d") { from = new Date(now.getTime() - 29 * 864e5); }
+  else if (r.preset === "year") { from = new Date(now.getFullYear(), 0, 1); }
+  else if (r.preset === "custom") { if (r.from) from = new Date(r.from + "T00:00"); if (r.to) to = new Date(r.to + "T00:00"); }
+  var a = from ? new Date(from.getFullYear(), from.getMonth(), from.getDate()).getTime() : -Infinity;
+  var b = to ? new Date(to.getFullYear(), to.getMonth(), to.getDate(), 23, 59, 59, 999).getTime() : Infinity;
+  return { on: r.preset !== "all", from: a, to: b, fromISO: from ? isoDay(from) : "", toISO: to ? isoDay(to) : "", preset: r.preset };
+}
+function clRangeFields() {
+  var rg = clRange(), o = function (v, l) { return '<option value="' + v + '"' + (rg.preset === v ? " selected" : "") + ">" + l + "</option>"; };
+  return '<label class="field" for="cl-per">Periodo<select id="cl-per" data-change="clPer">' + o("all", "Todo") + o("month", "Este mes") + o("lastmonth", "Mes pasado") + o("30d", "Últimos 30 días") + o("year", "Este año") + o("custom", "Fechas…") + "</select></label>" +
+    '<label class="field" for="cl-from">Desde<input id="cl-from" type="date" value="' + rg.fromISO + '" data-change="clFrom"></label>' +
+    '<label class="field" for="cl-to">Hasta<input id="cl-to" type="date" value="' + rg.toISO + '" data-change="clTo"></label>';
+}
+function clientPeriod(c, rg) {
+  var mv = clientLedger(c), out = { charge: 0, pay: 0, moves: 0, charges: 0, bal: mv.length ? mv[mv.length - 1].balance : 0 };
+  mv.forEach(function (m) { if (m.date < rg.from || m.date > rg.to) return; out.moves++; if (m.charge) { out.charge += m.charge; out.charges++; } if (m.pay) out.pay += m.pay; });
+  out.charge = Math.round(out.charge * 100) / 100; out.pay = Math.round(out.pay * 100) / 100;
+  return out;
+}
+function clKpisHTML(s) {
+  var rg = clRange(), cl = clientsOf(s), debt = 0, nDebt = 0, sales = 0, inc = 0, nCharges = 0, active = 0, fresh = 0;
+  cl.forEach(function (c) {
+    var t = clientPeriod(c, rg);
+    if (t.bal > 0.005) { debt += t.bal; nDebt++; }
+    sales += t.charge; inc += t.pay; nCharges += t.charges; if (t.moves) active++;
+    if (rg.on && c.createdAt >= rg.from && c.createdAt <= rg.to) fresh++;
+  });
+  var per = rg.on ? (rg.preset === "custom" ? (rg.fromISO ? fmtISO(rg.fromISO) : "inicio") + " – " + (rg.toISO ? fmtISO(rg.toISO) : "hoy") : { month: "este mes", lastmonth: "mes pasado", "30d": "últimos 30 días", year: "este año" }[rg.preset]) : "todo el tiempo";
+  var k = function (lbl, val, sub, color) { return '<div class="kpi"><span>' + lbl + '</span><strong' + (color ? ' style="color:' + color + '"' : "") + ">" + val + "</strong>" + (sub ? '<span class="muted" style="font-size:12px">' + sub + "</span>" : "") + "</div>"; };
+  return '<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">' +
+    k("Saldo pendiente", money(debt), nDebt + (nDebt === 1 ? " cliente debe" : " clientes deben") + " · hoy", debt > 0.005 ? "var(--bad)" : "") +
+    k("Ingresos", money(inc), "pagos y abonos · " + per, "var(--ok)") +
+    k("Ventas", money(sales), "pedidos y consumos · " + per) +
+    k("Venta promedio", money(nCharges ? sales / nCharges : 0), nCharges + (nCharges === 1 ? " venta" : " ventas") + " · " + per) +
+    k("Clientes activos", active + " de " + cl.length, rg.on ? fresh + (fresh === 1 ? " nuevo" : " nuevos") + " en el periodo" : "con al menos un movimiento") +
+    "</div>" + '<p class="muted" style="margin:-6px 0 0;font-size:12px">Ventas, ingresos, Total y Pagado son del periodo elegido; el saldo pendiente siempre es el de hoy. Los clientes «En línea» se crean cuando entran con su cuenta de Google, aunque todavía no hayan hecho un pedido.</p>';
+}
+Object.assign(CHANGE, {
+  clPer: function (el) { var r = ui.clRange || {}; ui.clRange = { preset: el.value, from: r.from || "", to: r.to || "" }; if (el.value === "custom" && !ui.clRange.from) { var d = new Date(); ui.clRange.from = isoDay(new Date(d.getFullYear(), d.getMonth(), 1)); ui.clRange.to = isoDay(d); } render(); },
+  clFrom: function (el) { var rg = clRange(); ui.clRange = { preset: "custom", from: el.value, to: rg.toISO }; render(); },
+  clTo: function (el) { var rg = clRange(); ui.clRange = { preset: "custom", from: rg.fromISO, to: el.value }; render(); }
+});
+Object.assign(ACT, {
+  invCsv: function () {
+    var s = curStore(), items = invOf(s.id).slice().sort(function (a, b) { var pa = printOf(a.printId) || {}, pb = printOf(b.printId) || {}; return String(pa.name).localeCompare(String(pb.name)); });
+    var rows = ["nombre,set,numero,foil,condicion,idioma,cantidad,precio_fijo,precio,scryfall_id,precio_en_tienda"];
+    items.forEach(function (i) {
+      var p = printOf(i.printId); if (!p) return;
+      var sid = p.scryfallId || (/^[0-9a-f]{8}-[0-9a-f]{4}-/.test(p.id) ? p.id : "");
+      var u = unitPrice(s, i);
+      rows.push([p.name, p.set, p.num, i.finish === "normal" ? "" : i.finish, i.cond, i.lang || "EN", i.qty, i.fixed ? "si" : "", i.fixed && i.price != null ? i.price : "", sid, u == null ? "" : u.toFixed(2)].map(csvCell).join(","));
+    });
+    var name = "inventario-" + slugify(s.name) + "-" + isoDay(new Date()) + ".csv";
+    downloadText(name, rows.join("\n"));
+    toast("Inventario descargado: " + (rows.length - 1) + " registros. Se puede volver a cargar en «Cargar Excel / CSV».");
+  }
+});
 window.addEventListener("hashchange", function () { applyRoute(); });
 db.stores.forEach(function (x) { if (x.pricing.fxMode !== "manual") { x.pricing.fxMode = "manual"; x.pricing.fx = x.pricing.manualFx || x.pricing.fx; } });
 if (!db.blankDone) { (function () { var s = db.stores.filter(function (x) { return x.id === "store-dr"; })[0] || db.stores[0]; db.stores = [s]; ["inventory","products","orders","events","payments","internal","promos","clients","tabs","clientPays","audit"].forEach(function (k) { db[k] = []; }); db.carts = {}; db.wishlists = {}; db.wishMeta = {}; db.buyerInfo = {}; db.buyer = null; db.wishSeeded = true; s.categories = []; s.nextOrder = 1001; s.theme.slides = []; s.adminEmail = ""; s.info.address = ""; s.info.whatsapp = ""; s.info.hours = ""; db.blankDone = true; })(); }
@@ -3970,7 +4041,7 @@ var FB_CONFIG = {
   messagingSenderId: "412449412802",
   appId: "1:412449412802:web:b8c5d83ec404481585cd5b"
 };
-var FB_SLUG = "neko-games", FB_SDK = "https://www.gstatic.com/firebasejs/10.14.1/", FB_CART = "nekogames-carrito";
+var FB_BUILD = 20261029, FB_SLUG = "neko-games", FB_SDK = "https://www.gstatic.com/firebasejs/10.14.1/", FB_CART = "nekogames-carrito";
 var FB = { user: null, admin: false, admins: [], pubOK: false, privOK: false, ordOK: false, meOK: false, lastPub: null, lastPriv: null, lastOrd: {}, lastMe: null, cliDocs: {}, then: null, timer: null, meCreated: null };
 var fdb = null, fauth = null;
 var G_ICON = '<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>';
@@ -3993,7 +4064,7 @@ var G_ICON = '<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"
 function fbStore() { return db.stores[0]; }
 function fbRefs() {
   var t = fdb.collection("tiendas").doc(FB_SLUG);
-  return { pub: t, priv: t.collection("privado").doc("datos"), acc: t.collection("acceso").doc("admins"), cnt: t.collection("contador").doc("pedidos"), ped: t.collection("pedidos"), cli: t.collection("clientes"), img: t.collection("imagenes"), parts: t.collection("partes") };
+  return { pub: t, priv: t.collection("privado").doc("datos"), acc: t.collection("acceso").doc("admins"), cnt: t.collection("contador").doc("pedidos"), ped: t.collection("pedidos"), cli: t.collection("clientes"), img: t.collection("imagenes"), parts: t.collection("partes"), main: t.collection("datos").doc("tienda"), blk: t.collection("bloques") };
 }
 function fbErr(e) {
   try { console.warn("[firebase]", e && (e.code || e.message) || e); } catch (x) {}
@@ -4016,6 +4087,7 @@ function fbMeData() {
 }
 function fbApplyPub(d) {
   if (!d || !d.store) return;
+  FB.serverInv = (d.inventory || []).length;
   db.stores = [d.store]; db.inventory = d.inventory || []; db.products = d.products || []; db.events = d.events || [];
   Object.keys(d.catalog || {}).forEach(function (id) { db.catalog[id] = d.catalog[id]; });
   ui.storeId = d.store.id;
@@ -4060,16 +4132,56 @@ function fbSplit() {
   return out;
 }
 function fbOnMain(snap, admin) {
-  if (!snap.exists) { if (admin) { FB.pubOK = true; fbFlush(); } return; }
-  FB.main = snap.data(); fbAssemble(admin);
+  if (!snap.exists) { FB.main = null; FB.needLegacy = true; fbLoadLegacy(admin); return; }
+  var m = snap.data();
+  if (m.minClient && m.minClient > FB_BUILD) { fbOutdated(admin); return; }
+  FB.needLegacy = false; FB.main = m; fbAssemble(admin);
 }
 function fbOnParts(qs, admin) {
   qs.forEach(function (d) { var x = d.data(); FB.parts[d.id] = x; if (admin) FB.lastPart[d.id] = x.h; });
-  fbAssemble(admin);
+  FB.partsLoaded = true; fbAssemble(admin);
+}
+/* Una pestaña abierta con una versión anterior deja de guardar y pide recargar. */
+function fbOutdated(admin) {
+  FB.readonly = true;
+  if (admin) fbGate("outdated"); else toast("Hay una versión nueva de la tienda: recarga la página.");
+}
+/* Primera vez con esta versión: se juntan los datos guardados con el formato anterior (documento principal y todas sus partes). */
+function fbLoadLegacy(admin) {
+  if (FB.legacyLoading) return; FB.legacyLoading = true;
+  var r = fbRefs();
+  Promise.all([r.pub.get().catch(function () { return null; }), r.parts.get().catch(function () { return null; })]).then(function (res) {
+    var lp = []; if (res[1]) res[1].forEach(function (d) { lp.push(d.data()); });
+    FB.legacy = { main: res[0] && res[0].exists ? res[0].data() : null, parts: lp };
+    fbAssemble(admin);
+  });
+}
+function fbAssembleLegacy(admin) {
+  var L = FB.legacy; if (!L || !FB.partsLoaded) return;
+  if (!L.main && !L.parts.length) { if (admin) { FB.pubOK = true; fbFlush(); } return; }
+  var json = L.main ? L.main.json : JSON.stringify(fbMainData());
+  var sig = "legacy|" + json.length + "|" + L.parts.length;
+  if (sig === FB.lastSig) return; FB.lastSig = sig;
+  fbUnpack(json, function (d) {
+    var inv = {}, order = [], cat = {};
+    L.parts.forEach(function (pt) {
+      var x; try { x = JSON.parse(pt.json); } catch (e) { return; }
+      (x.inventory || []).forEach(function (it) { if (!inv[it.id]) order.push(it.id); inv[it.id] = it; });
+      Object.keys(x.catalog || {}).forEach(function (k) { cat[k] = x.catalog[k]; });
+    });
+    (d.inventory || []).forEach(function (it) { if (!inv[it.id]) { order.push(it.id); inv[it.id] = it; } });
+    Object.keys(d.catalog || {}).forEach(function (k) { if (!cat[k]) cat[k] = d.catalog[k]; });
+    d.inventory = order.map(function (id) { return inv[id]; }); d.catalog = cat;
+    fbApplyPub(d);
+    FB.lastPub = json; FB.partN = Math.max(1, L.parts.length);
+    if (admin) { FB.pubOK = true; fbApplyStock(); FB.lastSig = null; setTimeout(fbFlush, 800); toast("Inventario cargado: " + d.inventory.length + " registros de cartas"); }
+    render();
+  });
 }
 /* Se arma la tienda solo cuando llegaron todas las partes que indica el documento principal. */
 function fbAssemble(admin) {
-  var m = FB.main; if (!m) return;
+  if (!FB.main && FB.needLegacy) return fbAssembleLegacy(admin);
+  var m = FB.main; if (!m || !FB.partsLoaded) return;
   var list = m.parts || null;
   if (list && !list.every(function (p) { return FB.parts[p.id] && FB.parts[p.id].h === p.h; })) return;
   var sig = m.json + "|" + (list ? list.map(function (p) { return p.h; }).join(",") : "old");
@@ -4098,10 +4210,16 @@ _saveDBraw = function () {
   return true;
 };
 function fbFlush() {
-  if (!fdb || !FB.user) return;
+  if (!fdb || !FB.user || FB.readonly) return;
   var r = fbRefs(), now = Date.now();
   if (FB.admin) {
     if (!FB.pubOK || !FB.privOK) return;
+    var invNow = (db.inventory || []).length;
+    if (FB.serverInv > 20 && invNow < FB.serverInv * 0.5) {
+      FB.readonly = true;
+      toast("Protección activada: se detuvo un guardado que dejaría " + invNow + " de " + FB.serverInv + " cartas. Recarga la página.");
+      return;
+    }
     var pk = fbPack(fbMainData()), pj = pk.json, parts = fbSplit();
     var sig = pj + "|" + parts.map(function (x) { return x.h; }).join(",");
     if (sig !== FB.lastSig) {
@@ -4120,10 +4238,10 @@ function fbFlush() {
           changed.forEach(function (x) { if (cur.length && size + x.json.length > 6000000) { groups.push(cur); cur = []; size = 0; } cur.push(x); size += x.json.length; });
           if (cur.length) groups.push(cur);
           var chain = Promise.resolve();
-          groups.forEach(function (g) { chain = chain.then(function () { var bt = fdb.batch(); g.forEach(function (x) { bt.set(r.parts.doc(x.id), { json: x.json, h: x.h, at: now }); }); return bt.commit(); }); });
+          groups.forEach(function (g) { chain = chain.then(function () { var bt = fdb.batch(); g.forEach(function (x) { bt.set(r.blk.doc(x.id), { json: x.json, h: x.h, at: now }); }); return bt.commit(); }); });
           return chain.then(function () {
-            changed.forEach(function (x) { FB.lastPart[x.id] = x.h; });
-            return r.pub.set({ json: pj, parts: parts.map(function (x) { return { id: x.id, h: x.h }; }), at: now });
+            changed.forEach(function (x) { FB.lastPart[x.id] = x.h; }); FB.serverInv = invNow;
+            return r.main.set({ json: pj, parts: parts.map(function (x) { return { id: x.id, h: x.h }; }), at: now, v: FB_BUILD, minClient: FB_BUILD });
           }).then(function () {
             prevRefs.forEach(function (id) { if (pk.refs.indexOf(id) < 0) { delete known[id]; r.img.doc(id).delete().catch(function () {}); } });
           });
@@ -4156,6 +4274,7 @@ function fbGate(state, msg) {
   var name = esc(fbStore().name), h;
   if (state === "checking") h = fbLogoHTML() + '<h2>Panel de ' + name + '</h2><div class="fb-spin" aria-label="Cargando"></div><p>Verificando tu acceso…</p>';
   else if (state === "login") h = fbLogoHTML() + '<h2>Panel de ' + name + '</h2><p>Entra con la cuenta de Google autorizada para administrar la tienda.</p><button type="button" class="fb-btn g" id="fb-g">' + G_ICON + 'Entrar con Google</button>';
+  else if (state === "outdated") h = fbLogoHTML() + '<h2>Hay una versión nueva del panel</h2><p>Recarga la página para seguir trabajando. Esta pestaña ya no guarda cambios para no sobrescribir los datos de la tienda.</p><button type="button" class="fb-btn" id="fb-reload">Recargar</button>';
   else if (state === "denied") h = fbLogoHTML() + '<h2>No tienes acceso</h2><p>La cuenta <strong>' + esc(FB.user ? FB.user.email : "") + '</strong> no está autorizada para este panel. Pide al dueño de la tienda que la agregue.</p><button type="button" class="fb-btn g" id="fb-other">' + G_ICON + 'Usar otra cuenta</button>';
   else h = fbLogoHTML() + '<h2>No pudimos conectar</h2><p>' + esc(msg || "Revisa tu conexión a internet y recarga la página.") + '</p><button type="button" class="fb-btn" id="fb-reload">Recargar</button>';
   el.innerHTML = '<div class="fb-card" role="dialog" aria-modal="true">' + h + "</div>";
@@ -4176,8 +4295,8 @@ function fbCheckAdmin(u) {
 function fbAdminOK() {
   FB.admin = true; fbGate(null);
   var r = fbRefs();
-  r.pub.onSnapshot(function (snap) { fbOnMain(snap, true); }, fbErr);
-  r.parts.onSnapshot(function (qs) { fbOnParts(qs, true); }, fbErr);
+  r.main.onSnapshot(function (snap) { fbOnMain(snap, true); }, fbErr);
+  r.blk.onSnapshot(function (qs) { fbOnParts(qs, true); }, fbErr);
   r.priv.onSnapshot(function (snap) {
     if (!snap.exists) { FB.privOK = true; fbMergeAllClients(); fbFlush(); return; }
     var j = snap.data().json; if (FB.privOK && j === FB.lastPriv) return;
@@ -4367,8 +4486,8 @@ function fbBoot() {
     firebase.initializeApp(FB_CONFIG);
     fauth = firebase.auth(); fdb = firebase.firestore();
     if (APP_MODE !== "panel") {
-      fbRefs().pub.onSnapshot(function (snap) { fbOnMain(snap, false); }, fbErr);
-      fbRefs().parts.onSnapshot(function (qs) { fbOnParts(qs, false); }, fbErr);
+      fbRefs().main.onSnapshot(function (snap) { fbOnMain(snap, false); }, fbErr);
+      fbRefs().blk.onSnapshot(function (qs) { fbOnParts(qs, false); }, fbErr);
     }
     fauth.onAuthStateChanged(function (u) {
       if (APP_MODE === "panel") { if (!u) { FB.user = null; FB.admin = false; fbGate("login"); return; } FB.user = u; fbCheckAdmin(u); return; }
@@ -4376,6 +4495,92 @@ function fbBoot() {
       else { FB.user = null; FB.meOK = false; db.buyer = null; db.orders = []; render(); }
     });
   });
+}
+
+/* ---- Recuperación: cartas que tenía la tienda el 29 de octubre (lista guardada en GitHub por la tarea de precios) ---- */
+var REC = { state: "idle", ids: [], prints: null, err: null, done: 0 };
+var REC_URLS = [
+  "https://raw.githubusercontent.com/gacostatche-coder/nekogames/c5a0d8d9245077602c57ce481be01e40e43c5710/ck-precios.json",
+  "recuperacion-29oct.json"
+];
+function recSfids() {
+  var s = curStore(), have = {};
+  (db.inventory || []).forEach(function (i) { if (i.storeId !== s.id) return; var p = db.catalog[i.printId]; var sid = p && (p.scryfallId || (/^[0-9a-f]{8}-[0-9a-f]{4}-/.test(p.id) ? p.id : null)); if (sid) have[sid] = 1; });
+  return REC.ids.filter(function (id) { return !have[id]; });
+}
+function recLoad() {
+  if (REC.state !== "idle") return;
+  REC.state = "loading";
+  (function tryUrl(i) {
+    if (i >= REC_URLS.length) { REC.state = "none"; render(); return; }
+    fetch(REC_URLS[i], { cache: "no-cache" }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (d) { REC.ids = d.revisadas || []; REC.state = "ready"; render(); })
+      .catch(function () { tryUrl(i + 1); });
+  })(0);
+}
+/* Trae de Scryfall los datos de cada carta faltante, de 75 en 75. */
+function recFetchPrints(ids) {
+  var out = [], chunks = [];
+  for (var i = 0; i < ids.length; i += 75) chunks.push(ids.slice(i, i + 75));
+  REC.done = 0;
+  return chunks.reduce(function (pr, ch) {
+    return pr.then(function () {
+      return sfFetch("https://api.scryfall.com/cards/collection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ identifiers: ch.map(function (id) { return { id: id }; }) }) })
+        .then(function (res) { (res.data || []).forEach(function (c) { out.push(fromScryfall(c)); }); REC.done += ch.length; var el = document.getElementById("rec-prog"); if (el) el.textContent = "Consultando Scryfall… " + REC.done + " de " + ids.length; })
+        .then(function () { return new Promise(function (ok) { setTimeout(ok, 120); }); });
+    });
+  }, Promise.resolve()).then(function () { return out; });
+}
+function recCardHTML() {
+  recLoad();
+  if (REC.state === "none" || REC.state === "idle") return "";
+  if (REC.state === "loading") return '<div class="card"><p class="muted" style="margin:0">Buscando la lista de recuperación…</p></div>';
+  var miss = recSfids();
+  if (!miss.length) return '<div class="card stack"><h2 style="font-size:18px">Recuperación del 29 de octubre</h2><p class="muted" style="margin:0">Todas las cartas de la lista (' + REC.ids.length + ') ya están en tu inventario.</p></div>';
+  var busy = REC.state === "working";
+  return '<div class="card stack" style="border:2px solid var(--brand)"><h2 style="font-size:18px">Recuperar cartas del 29 de octubre</h2>' +
+    '<p style="margin:0">Hay <strong>' + miss.length + '</strong> cartas que la tienda tenía el 29 de octubre y ya no están en el inventario. Sabemos qué carta y qué versión eran, pero no la cantidad, la condición ni si eran foil.</p>' +
+    '<ol style="margin:0;padding-left:20px;line-height:1.6"><li><strong>Descargar Excel para llenar:</strong> baja la lista con nombre, set y número. Llena cantidad, condición, foil e idioma y cárgala aquí abajo.</li>' +
+    '<li><strong>Agregar todas con existencia 0:</strong> las da de alta de inmediato (Normal, NM, inglés) para que tus clientes las encuentren. Después ajustas cantidades en el inventario.</li></ol>' +
+    (REC.err ? '<p class="pill bad" style="white-space:normal;border-radius:8px;margin:0">' + esc(REC.err) + "</p>" : "") +
+    (busy ? '<p class="muted" id="rec-prog" style="margin:0">Consultando Scryfall…</p>' :
+      '<div class="row" style="gap:8px"><button type="button" class="btn pri" data-act="recCsv">Descargar Excel para llenar</button><button type="button" class="btn" data-act="recAddZero">Agregar todas con existencia 0</button></div>') +
+    "</div>";
+}
+function recRun(then) {
+  var miss = recSfids(); if (!miss.length) return;
+  REC.state = "working"; REC.err = null; render();
+  recFetchPrints(miss).then(function (prints) {
+    REC.state = "ready";
+    if (!prints.length) { REC.err = "No se pudo consultar Scryfall. Revisa tu conexión e inténtalo otra vez."; render(); return; }
+    then(prints); render();
+  }).catch(function () { REC.state = "ready"; REC.err = "No se pudo consultar Scryfall. Revisa tu conexión e inténtalo otra vez."; render(); });
+}
+Object.assign(ACT, {
+  recCsv: function () {
+    recRun(function (prints) {
+      var q = function (v) { v = String(v == null ? "" : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+      prints.forEach(function (p) { addToCatalog(p); });
+      var rows = ["nombre,set,numero,foil,condicion,idioma,cantidad,precio_fijo,precio,scryfall_id"].concat(prints.sort(function (a, b) { return a.name.localeCompare(b.name); }).map(function (p) {
+        return [p.name, p.set, p.num, "", "NM", "EN", "", "", "", p.id].map(q).join(",");
+      }));
+      var blob = new Blob(["﻿" + rows.join("\n")], { type: "text/csv;charset=utf-8" });
+      var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "recuperacion-neko-games.csv"; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      toast("Lista descargada: " + prints.length + " cartas. Llena cantidad y condición y cárgala aquí.");
+    });
+  },
+  recAddZero: function () {
+    recRun(function (prints) {
+      var s = curStore(), n = 0;
+      prints.forEach(function (p) { var c = addToCatalog(p); var fin = c.finishes.indexOf("normal") >= 0 ? "normal" : c.finishes[0]; addInventory(s, c.id, fin, "NM", "EN", 0, null); n++; });
+      auditLog(s.id, "Inventario", "Recuperó " + n + " cartas del 29 de octubre con existencia 0", "");
+      saveDB(); toast(n + " cartas agregadas con existencia 0. Ajusta las cantidades en Inventario de cartas.");
+    });
+  }
+});
+if (typeof admImportWrap === "function") {
+  var _recImport = admImportWrap;
+  admImportWrap = function (s) { return recCardHTML() + _recImport(s); };
 }
 
 saveDB();
