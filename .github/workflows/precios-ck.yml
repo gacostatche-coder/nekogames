@@ -44,9 +44,18 @@ jobs:
           url = "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/tiendas/%s" % (os.environ["PROYECTO"], os.environ["TIENDA"])
           doc = json.load(urllib.request.urlopen(url, timeout=60))
           tienda = json.loads(doc["fields"]["json"]["stringValue"])
+          inventario = tienda.get("inventory", [])
           cat = tienda.get("catalog", {})
+          if "parts" in doc["fields"]:
+              # formato nuevo: inventario y catálogo repartidos en tiendas/<tienda>/partes
+              inventario, cat = [], {}
+              res = json.load(urllib.request.urlopen(url + "/partes?pageSize=300", timeout=60))
+              for pd in res.get("documents", []):
+                  parte = json.loads(pd["fields"]["json"]["stringValue"])
+                  inventario += parte.get("inventory", [])
+                  cat.update(parte.get("catalog", {}))
           ids = set()
-          for i in tienda.get("inventory", []):
+          for i in inventario:
               pid = i.get("printId") or ""
               sid = (cat.get(pid) or {}).get("scryfallId") or (pid if re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-", pid) else None)
               if sid:
