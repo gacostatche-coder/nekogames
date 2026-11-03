@@ -855,7 +855,7 @@ function unitPrice(store, item) {
   if (b == null) return null;
   var f = (store.pricing.cond[item.cond] || 100) / 100;
   var v = Math.round(b * store.pricing.fx * (1 + store.pricing.margin / 100) * f * 100) / 100;
-  var mn = Number(store.pricing.minPrice) || 0;
+  var mbc = store.pricing.minByCond, mn = mbc ? Number(mbc[item.cond]) || 0 : Number(store.pricing.minPrice) || 0;
   return mn > 0 && v < mn ? mn : v;
 }
 function cartOf(storeId) { if (!db.carts[storeId]) db.carts[storeId] = []; return db.carts[storeId]; }
@@ -1178,6 +1178,7 @@ function viewStore() {
   else if (tab === "orders") body = storeOrders(s);
   else if (tab === "events") body = storeEvents(s);
   else if (tab === "confirm") body = storeConfirm(s);
+  else if (tab === "vender") body = storeSell(s);
   function t(id, label) { return '<button type="button" data-act="storeTab" data-tab="' + id + '"' + (tab === id ? ' aria-current="page"' : "") + ">" + label + "</button>"; }
   var buyer = db.buyer;
   return '<div class="st" style="' + v.css + '">' +
@@ -1188,7 +1189,7 @@ function viewStore() {
     (buyer ? '<button type="button" class="sbtn" data-act="openProfile" aria-label="Mi perfil">' + avatarHTML(buyer, 28) + esc(buyer.name.split(" ")[0]) + "</button>"
            : '<button type="button" class="sbtn" data-act="loginBuyer">' + ICON.user + "Entrar con Google</button>") +
     '<button type="button" class="sbtn acc" data-act="storeTab" data-tab="cart">' + ICON.cart + 'Carrito <span class="mono">' + cartCount(s.id) + "</span></button></div></div>" +
-    '<nav class="tabs" aria-label="Secciones">' + t("home", "Inicio") + t("catalog", "Cartas sueltas") + t("products", "Otros productos") + t("wishlist", "Mi wishlist") + t("orders", "Mis pedidos") + t("events", "Eventos") + "</nav></div></header>" +
+    '<nav class="tabs" aria-label="Secciones">' + t("home", "Inicio") + t("catalog", "Cartas sueltas") + t("products", "Otros productos") + t("wishlist", "Mi wishlist") + t("orders", "Mis pedidos") + t("events", "Eventos") + t("vender", "Vende tus cartas") + "</nav></div></header>" +
     '<main class="wrap gut">' + body + "</main>" +
     '<footer class="foot"><div class="wrap gut"><div class="stack" style="gap:4px;max-width:440px"><strong style="color:var(--s-text);font-family:var(--f-display);font-size:16px">' + esc(s.name) + "</strong><span>" + esc(s.info.address || "") + "</span><span>" + esc(s.info.hours || "") + "</span></div>" +
     '<div class="stack" style="gap:4px"><span>WhatsApp: <span class="mono">' + esc(s.info.whatsapp || "—") + "</span></span><span>Formas de pago: las verás al confirmar tu pedido.</span></div>" +
@@ -1524,8 +1525,9 @@ function viewAdmin() {
   else if (t === "precios") body = admPricing(s);
   else if (t === "apariencia") body = admAppearance(s);
   else if (t === "datos") body = admInfo(s);
+  else if (t === "compras") body = admBuy(s);
   return '<div class="adm"><aside class="adm-side"><div class="row" style="gap:10px;flex-wrap:nowrap">' + logoHTML(s, 38) + '<div style="line-height:1.25;min-width:0"><strong>' + esc(s.name) + '</strong><br><span class="muted" style="font-size:12px">Panel de la tienda</span></div></div>' +
-    '<nav aria-label="Panel">' + n("cuentas", "Cuentas abiertas", openTabs(s).length) + n("clientes", "Clientes") + n("deseos", "Wishlist de clientes") + n("pedidos", "Pedidos", pend) + '<hr class="navsep">' + n("inventario", "Inventario de cartas") + n("productos", "Otros productos") + n("interno", "Inventario interno") + n("importar", "Cargar Excel / CSV") + '<hr class="navsep">' + n("eventos", "Eventos") + n("banners", "Banners") + n("precios", "Precios y margen") + n("apariencia", "Apariencia") + n("datos", "Datos y pagos") + '<hr class="navsep">' + n("historial", "Historial de cambios") + "</nav>" +
+    '<nav aria-label="Panel">' + n("cuentas", "Cuentas abiertas", openTabs(s).length) + n("clientes", "Clientes") + n("deseos", "Wishlist de clientes") + n("pedidos", "Pedidos", pend) + n("compras", "Compras a clientes", typeof buyPendingCount === "function" ? buyPendingCount(s) : 0) + '<hr class="navsep">' + n("inventario", "Inventario de cartas") + n("productos", "Otros productos") + n("interno", "Inventario interno") + n("importar", "Cargar Excel / CSV") + '<hr class="navsep">' + n("eventos", "Eventos") + n("banners", "Banners") + n("precios", "Precios y margen") + n("apariencia", "Apariencia") + n("datos", "Datos y pagos") + '<hr class="navsep">' + n("historial", "Historial de cambios") + "</nav>" +
     '<div class="stack" style="margin-top:auto;gap:6px">' + (STORE_URL ? '<a class="btn sm" href="' + STORE_URL + '" target="_blank" rel="noopener">Ver mi tienda</a>' : '<button type="button" class="btn sm" data-act="nav" data-to="' + esc(s.slug) + '">Ver mi tienda</button>') + '<button type="button" class="btn sm" data-act="adminLogout">Salir</button></div></aside>' +
     '<main class="adm-main">' + body + "</main></div>";
 }
@@ -1902,12 +1904,13 @@ function admPricing(s) {
     '' + ckStatusHTML() + '</div>' +
     '<div class="card stack"><h2 style="font-size:18px">Margen y tipo de cambio</h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">' +
     '<label class="field" for="pr-margin">Margen de ganancia (%)<input id="pr-margin" type="number" step="0.5" min="0" max="300" value="' + pr.margin + '" class="mono"></label>' +
-    '<label class="field" for="pr-min">Precio mínimo por carta (MXN)<input id="pr-min" type="number" step="0.5" min="0" value="' + (Number(pr.minPrice) > 0 ? pr.minPrice : "") + '" placeholder="Sin mínimo" class="mono"></label>' +
     '<div class="field">Tipo de cambio en uso<span class="mono" style="font-size:20px;color:var(--ink);padding-top:8px">$' + pr.fx.toFixed(2) + '</span></div></div>' +
-    '<p class="muted" style="margin:0;font-size:13px">Precio mínimo: si después del cálculo una carta queda abajo de este precio, se vende al mínimo. No cambia las cartas con precio fijo. Déjalo vacío para no usar mínimo.</p>' +
     '<p class="muted" style="margin:0;font-size:13px">Este valor convierte a pesos los precios de referencia en dólares.</p></div>' +
     '<div class="card stack"><h2 style="font-size:18px">Precio por condición (% del NM)</h2><div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">' +
     CONDS.map(function (c) { return '<label class="field" for="pr-' + c + '">' + c + '<input id="pr-' + c + '" type="number" min="1" max="100" value="' + pr.cond[c] + '" class="mono"></label>'; }).join("") + "</div></div>" +
+    '<div class="card stack"><h2 style="font-size:18px">Precio mínimo por condición (MXN)</h2><div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">' +
+    CONDS.map(function (c) { var v = (pr.minByCond || {})[c]; if (v == null && Number(pr.minPrice) > 0) v = pr.minPrice; return '<label class="field" for="pr-min-' + c + '">' + c + '<input id="pr-min-' + c + '" type="number" min="0" step="0.5" value="' + (Number(v) > 0 ? v : "") + '" placeholder="Sin mínimo" class="mono"></label>'; }).join("") + "</div>" +
+    '<p class="muted" style="margin:0;font-size:13px">Si después del cálculo una carta queda abajo del mínimo de su condición, se vende al mínimo. No cambia las cartas con precio fijo. Deja vacío para no usar mínimo en esa condición.</p></div>' +
     '<button type="submit" class="btn pri" style="align-self:flex-start">Guardar y recalcular</button></form>' +
     '<div class="b"><div class="card stack"><h2 style="font-size:18px">Así queda el precio</h2><p class="mono" style="margin:0;font-size:13px">Precio = base USD × tipo de cambio × (1 + margen) × condición</p>' +
     '<div class="tbl-box"><table class="tbl" style="min-width:520px"><thead><tr><th>Carta</th><th>Base</th><th>Fórmula</th><th>Público</th></tr></thead><tbody>' + sample + "</tbody></table></div></div></div></div>";
@@ -2079,6 +2082,7 @@ function renderModal() {
   else if (m.type === "clientPay") inner = clientPayModal(m);
   else if (m.type === "promo") inner = promoModal(m);
   else if (m.type === "reset") inner = '<div class="dlg plat sm"><div class="stack"><h2 style="font-size:22px">¿Restablecer los datos de ejemplo?</h2><p class="muted" style="margin:0">Se borran las tiendas, inventario, pedidos, eventos y pagos que hayas creado y vuelven los datos de ejemplo.</p><div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeModal">Cancelar</button><button type="button" class="btn pri" data-act="resetDo">Restablecer</button></div></div></div>';
+  if (!inner && typeof extraModal === "function") inner = extraModal(m) || "";
   var wasOpen = root.firstChild;
   root.innerHTML = '<div class="ov" data-act="ovClose" role="dialog" aria-modal="true">' + inner + "</div>";
   if (!wasOpen) { var f = root.querySelector("input:not([type=hidden]):not(.sr),button.x"); if (f) f.focus(); }
@@ -2204,6 +2208,7 @@ function placeOrder(note) {
   });
   var o = { id: uid("ord"), storeId: s.id, number: s.nextOrder++, buyer: { id: db.buyer.id, name: db.buyer.name, email: db.buyer.email, phone: db.buyer.phone || "" }, items: items, status: "pendiente", createdAt: Date.now(), note: note || "" };
   o.total = items.reduce(function (a, i) { return a + i.unit * i.qty; }, 0);
+  if (ui.useCredit && typeof myCredit === "function") { var mc0 = myCredit(); if (mc0.avail > 0) o.creditUsed = Math.round(Math.min(mc0.avail, o.total) * 100) / 100; ui.useCredit = false; }
   db.orders.push(o); db.carts[s.id] = []; ui.lastOrder = o.id; ui.storeTab = "confirm"; saveDB(); render(); window.scrollTo(0, 0);
 }
 function copyText(t, okMsg) {
@@ -3150,7 +3155,7 @@ function tabCloseModal(m) {
     '<div class="card sumbox" style="padding:14px">' + lines + '<div class="sumrow" style="border-top:1px solid var(--line);padding-top:6px"><span>Subtotal</span><span>' + money(r.subtotal) + "</span></div>" + (r.discount ? '<div class="sumrow ok"><span>Descuentos</span><span>−' + money(r.discount) + "</span></div>" : "") + promoRows + '<div class="sumrow total"><span>Total a cobrar</span><span>' + money(r.total) + "</span></div></div>";
   if (m.step === "confirm") {
     var paid = Math.min(d.amount, r.total), change = Math.max(0, d.amount - r.total), owe = Math.max(0, r.total - d.amount);
-    var who = c || clientById(d.clientId);
+    var who = c || clientById(d.clientId) || (d.clientId === "__new__" ? { name: t.label } : null);
     return head + '<div class="confirmbox"><strong>Revisa antes de confirmar</strong><ul>' +
       "<li>Recibido: <strong>" + money(d.amount) + "</strong>" + (d.amount ? " · " + esc(d.method) + (d.ref ? " · ref. " + esc(d.ref) : "") : "") + "</li>" +
       (change ? "<li>Cambio a entregar: <strong>" + money(change) + "</strong></li>" : "") +
@@ -3159,13 +3164,20 @@ function tabCloseModal(m) {
       '<div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-act="tabCloseBack">Volver</button><button type="button" class="btn pri" data-act="tabCloseDo">Sí, cerrar cuenta</button></div></div></div>';
   }
   var cl = clientsOf(s).slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
-  var meth = ["Efectivo", "Transferencia", "Tarjeta", "Depósito"].map(function (x) { return "<option" + (d.method === x ? " selected" : "") + ">" + x + "</option>"; }).join("");
+  var meth = ["Efectivo", "Transferencia", "Tarjeta", "Depósito", "Crédito en tienda"].map(function (x) { return "<option" + (d.method === x ? " selected" : "") + ">" + x + "</option>"; }).join("");
   return head + '<form class="stack" data-submit="tabCloseNext">' +
     '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px"><label class="field" for="tc-amount">Recibido (MXN)<input id="tc-amount" type="number" min="0" step="0.5" class="mono" value="' + (d.amount != null ? d.amount : r.total) + '"></label>' +
     '<label class="field" for="tc-method">Método<select id="tc-method">' + meth + "</select></label>" +
     '<label class="field" for="tc-ref">Referencia (si es transferencia)<input id="tc-ref" class="mono" value="' + esc(d.ref || "") + '"></label>' +
     '<label class="field" for="tc-note">Nota<input id="tc-note" value="' + esc(d.note || "") + '" placeholder="Opcional"></label></div>' +
-    (c ? "" : '<label class="field" for="tc-client">Cliente (obligatorio si queda a deber)<select id="tc-client"><option value="">— Sin cliente —</option>' + cl.map(function (x) { return '<option value="' + x.id + '"' + (d.clientId === x.id ? " selected" : "") + ">" + esc(x.name) + "</option>"; }).join("") + "</select></label>") +
+    (c ? "" : (function () {
+      if (d.clientId === undefined) d.clientId = tabDefaultClient(t);
+      var lbl = String(t.label || "").trim(), match = lbl && clientByName(s, lbl);
+      return '<label class="field" for="tc-client">Cliente<select id="tc-client"><option value=""' + (!d.clientId ? " selected" : "") + '>— Sin cliente (venta de mostrador) —</option>' +
+        (lbl && !match ? '<option value="__new__"' + (d.clientId === "__new__" ? " selected" : "") + ">Crear cliente «" + esc(lbl) + "»</option>" : "") +
+        cl.map(function (x) { return '<option value="' + x.id + '"' + (d.clientId === x.id ? " selected" : "") + ">" + esc(x.name) + "</option>"; }).join("") + "</select></label>" +
+        '<p class="muted" style="margin:0;font-size:12px">Con cliente, la cuenta queda en su historial de Clientes. Es obligatorio si queda saldo a deber.</p>';
+    })()) +
     '<p class="muted" style="margin:0;font-size:13px">Pon 0 en «Recibido» para dejar toda la cuenta a deber, o una parte para un abono.</p>' +
     '<div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeModal">Seguir con la cuenta</button><button type="submit" class="btn pri">Continuar</button></div></form></div></div>';
 }
@@ -3238,7 +3250,7 @@ function clientPayModal(m) {
       (d.amount > bal + 0.005 ? '<p class="pill warn" style="white-space:normal;border-radius:8px;padding:8px 12px">El abono es mayor que el saldo; quedará saldo a favor del cliente.</p>' : "") +
       '<div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-act="clientPayBack">Volver</button><button type="button" class="btn pri" data-act="clientPayDo">Sí, registrar abono</button></div></div></div>';
   }
-  var meth = ["Efectivo", "Transferencia", "Tarjeta", "Depósito"].map(function (x) { return "<option" + (d.method === x ? " selected" : "") + ">" + x + "</option>"; }).join("");
+  var meth = ["Efectivo", "Transferencia", "Tarjeta", "Depósito", "Crédito en tienda"].map(function (x) { return "<option" + (d.method === x ? " selected" : "") + ">" + x + "</option>"; }).join("");
   return head + '<form class="stack" data-submit="clientPayNext"><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px"><label class="field" for="cp-amount">Monto (MXN)<input id="cp-amount" type="number" min="0.5" step="0.5" required class="mono" value="' + (d.amount != null ? d.amount : bal) + '"></label>' +
     '<label class="field" for="cp-method">Método<select id="cp-method">' + meth + "</select></label>" +
     '<label class="field" for="cp-ref">Referencia<input id="cp-ref" class="mono" value="' + esc(d.ref || "") + '"></label><label class="field" for="cp-date">Fecha<input id="cp-date" type="date" value="' + esc(d.date || todayISO()) + '"></label></div>' +
@@ -3466,7 +3478,7 @@ Object.assign(SUBMIT, {
   savePricing: function (f) {
     var s = curStore(), pr = s.pricing;
     pr.margin = Math.max(0, Number(f.querySelector("#pr-margin").value) || 0);
-    var mnEl = f.querySelector("#pr-min"); if (mnEl) pr.minPrice = Math.max(0, Number(mnEl.value) || 0);
+    pr.minByCond = {}; CONDS.forEach(function (c) { var el = f.querySelector("#pr-min-" + c); pr.minByCond[c] = el ? Math.max(0, Number(el.value) || 0) : 0; }); delete pr.minPrice;
     CONDS.forEach(function (c) { pr.cond[c] = Math.min(100, Math.max(1, Number(f.querySelector("#pr-" + c).value) || pr.cond[c])); });
     saveDB(); render(); toast("Precios recalculados");
   }
@@ -4029,6 +4041,749 @@ Object.assign(ACT, {
     toast("Inventario descargado: " + (rows.length - 1) + " registros. Se puede volver a cargar en «Cargar Excel / CSV».");
   }
 });
+
+/* Ronda 14: las cuentas cerradas quedan ligadas a un cliente */
+function clientByName(s, name) { var n = norm(String(name || "").trim()); return n ? clientsOf(s).filter(function (c) { return norm(c.name.trim()) === n; })[0] : null; }
+function tabDefaultClient(t) { var s = curStore(), lbl = String(t.label || "").trim(); if (!lbl) return ""; var m = clientByName(s, lbl); return m ? m.id : "__new__"; }
+function newClientFromName(s, name) {
+  var c = { id: uid("cl"), storeId: s.id, name: String(name).trim(), phone: "", email: "", buyerId: null, source: "tienda", notes: "", createdAt: Date.now() };
+  db.clients.push(c); return c;
+}
+(function () {
+  var prev = ACT.tabCloseDo;
+  ACT.tabCloseDo = function (el) {
+    var m = ui.modal, t = m && tabOf(m.id);
+    if (t && m.data && m.data.clientId === "__new__") {
+      var s = curStore(), c = clientByName(s, t.label) || newClientFromName(s, t.label);
+      m.data.clientId = c.id;
+      auditLog(s.id, "Clientes", "Dio de alta al cliente «" + c.name + "» al cerrar su cuenta", tabAuditUser());
+    }
+    return prev.apply(this, arguments);
+  };
+})();
+/* Cuentas cerradas que quedaron sin cliente (se cerraron solo con un nombre rápido). */
+function orphanTabs(s) { return (db.tabs || []).filter(function (t) { return t.storeId === s.id && t.status === "cerrada" && !t.clientId; }); }
+function orphanTabsHTML(s) {
+  var list = orphanTabs(s); if (!list.length) return "";
+  var groups = {};
+  list.forEach(function (t) { var k = norm(String(t.label || "").trim()) || "__sin__"; (groups[k] = groups[k] || { label: String(t.label || "").trim(), tabs: [] }).tabs.push(t); });
+  var cl = clientsOf(s).slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
+  var rows = Object.keys(groups).map(function (k) {
+    var g = groups[k], tot = g.tabs.reduce(function (a, t) { return a + (Number(t.total) || 0); }, 0), last = Math.max.apply(null, g.tabs.map(function (t) { return t.closedAt || 0; }));
+    var match = g.label && clientByName(s, g.label);
+    return "<tr><td><strong>" + esc(g.label || "Sin nombre") + "</strong></td><td class=\"num\">" + g.tabs.length + '</td><td class="num">' + money(tot) + '</td><td class="muted" style="font-size:13px">' + fmtDay(last) + "</td>" +
+      '<td><div class="row" style="gap:6px;flex-wrap:wrap">' + (g.label ? '<button type="button" class="btn sm pri" data-act="orphanCreate" data-k="' + esc(k) + '">' + (match ? "Ligar a «" + esc(match.name) + "»" : "Crear cliente") + "</button>" : "") +
+      '<label class="sr" for="or-' + esc(k) + '">Ligar a otro cliente</label><select id="or-' + esc(k) + '" class="dsel" data-change="orphanLink" data-k="' + esc(k) + '"><option value="">Ligar a otro cliente…</option>' + cl.map(function (c) { return '<option value="' + c.id + '">' + esc(c.name) + "</option>"; }).join("") + "</select></div></td></tr>";
+  }).join("");
+  return '<div class="card stack" style="border:2px solid var(--warn)"><h2 style="font-size:18px">Cuentas cerradas sin cliente (' + list.length + ")</h2>" +
+    '<p class="muted" style="margin:0">Estas cuentas se cerraron solo con un nombre rápido, por eso no aparecen en ningún cliente. Crea el cliente o lígalas a uno existente para verlas en su historial.</p>' +
+    '<div class="tbl-box"><table class="tbl" style="min-width:640px"><thead><tr><th>Nombre de la cuenta</th><th class="num">Cuentas</th><th class="num">Total</th><th>Última</th><th></th></tr></thead><tbody>' + rows + "</tbody></table></div></div>";
+}
+function orphanAssign(s, k, c) {
+  var n = 0;
+  orphanTabs(s).forEach(function (t) { if ((norm(String(t.label || "").trim()) || "__sin__") === k) { t.clientId = c.id; n++; } });
+  auditLog(s.id, "Clientes", "Ligó " + n + (n === 1 ? " cuenta cerrada" : " cuentas cerradas") + " al cliente «" + c.name + "»", tabAuditUser());
+  saveDB(); render(); toast(n + (n === 1 ? " cuenta ligada a " : " cuentas ligadas a ") + c.name);
+}
+Object.assign(ACT, {
+  orphanCreate: function (el) {
+    var s = curStore(), k = el.dataset.k, t = orphanTabs(s).filter(function (x) { return norm(String(x.label || "").trim()) === k; })[0]; if (!t) return;
+    var c = clientByName(s, t.label);
+    if (!c) { c = newClientFromName(s, t.label); auditLog(s.id, "Clientes", "Dio de alta al cliente «" + c.name + "» desde sus cuentas cerradas", tabAuditUser()); }
+    orphanAssign(s, k, c);
+  }
+});
+Object.assign(CHANGE, {
+  orphanLink: function (el) { var s = curStore(), c = clientById(el.value); if (c) orphanAssign(s, el.dataset.k, c); }
+});
+(function () {
+  var prev = admClients;
+  admClients = function (s) { var h = prev(s); return ui.clientId ? h : h.replace('<div id="cl-results">', orphanTabsHTML(s) + '<div id="cl-results">'); };
+})();
+/* ===================== Ronda 15: "Vende tus cartas", compras a clientes, órdenes de compra y crédito en tienda ===================== */
+var BUY_STATUS = {
+  pendiente: { label: "Pendiente de revisión", cls: "warn", client: "Pendiente de revisión" },
+  aprobada: { label: "Aprobada · por recibir", cls: "brand", client: "Aprobada: lleva tus cartas a la tienda" },
+  completada: { label: "Recibida y liberada", cls: "ok", client: "Completada" },
+  rechazada: { label: "Rechazada", cls: "neu", client: "Rechazada" }
+};
+var OC_STATUS = {
+  pendiente_entrega: { label: "Esperando cartas", cls: "warn" },
+  por_pagar: { label: "Por pagar", cls: "bad" },
+  pagada: { label: "Pagada", cls: "ok" },
+  cancelada: { label: "Cancelada", cls: "neu" }
+};
+var KIND_LABEL = { wish: "En wishlist", normal: "Carta", bulk: "Bulk", sinprecio: "Sin precio" };
+function buyCfg(s) {
+  var b = s.buy || (s.buy = {});
+  if (!b.pct) b.pct = { NM: 50, LP: 55, MP: 60, HP: 70 };
+  if (!b.wpct) b.wpct = { NM: 20, LP: 25, MP: 30, HP: 40 };
+  if (b.bulkMax == null) b.bulkMax = 30;
+  if (b.bulkPrice == null) b.bulkPrice = 50;
+  if (b.bulkPer == null) b.bulkPer = 100;
+  if (b.bonus == null) b.bonus = 0;
+  if (b.validDays == null) b.validDays = 7;
+  if (b.roundDown == null) b.roundDown = false;
+  return b;
+}
+function buySnap(s) { var b = buyCfg(s); return { pct: Object.assign({}, b.pct), wpct: Object.assign({}, b.wpct), bulkMax: b.bulkMax, bulkPrice: b.bulkPrice, bulkPer: b.bulkPer, bonus: b.bonus, roundDown: !!b.roundDown, fx: s.pricing.fx }; }
+function r2(n) { return Math.round(n * 100) / 100; }
+function buyUnit(cfg, base, cond, wish, mode) {
+  if (base == null) return null;
+  var t = wish ? cfg.wpct : cfg.pct, pct = t[cond] != null ? Number(t[cond]) : Number(t.NM) || 0;
+  var u = base * (1 - pct / 100);
+  if (mode === "credito" && cfg.bonus > 0) u = u * (1 + cfg.bonus / 100);
+  u = Math.max(0, u);
+  return cfg.roundDown ? Math.floor(u) : r2(u);
+}
+function buyBulkTotal(cfg, qty) { var v = qty * Number(cfg.bulkPrice || 0) / Math.max(1, Number(cfg.bulkPer) || 1); return cfg.roundDown ? Math.floor(v) : r2(v); }
+function buyBase(ck, foil, fx) { if (!ck) return null; var u = foil ? ck[1] : ck[0]; return u == null ? null : r2(Number(u) * fx); }
+/* Precios completos de Card Kingdom (lista diaria repartida en 16 archivos por el primer carácter del id de Scryfall). */
+var CKF = { shards: {}, loading: {} };
+function ckFullBase() { return typeof CK_FULL_BASE !== "undefined" ? CK_FULL_BASE : "ck-completo/"; }
+function ckFullGet(ids) {
+  var need = {}; ids.forEach(function (id) { if (id) need[String(id)[0]] = 1; });
+  return Promise.all(Object.keys(need).map(function (k) {
+    if (CKF.shards[k]) return null;
+    if (!CKF.loading[k]) CKF.loading[k] = fetch(ckFullBase() + k + ".json", { cache: "no-cache" }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (d) { CKF.shards[k] = d; }).catch(function () { CKF.shards[k] = {}; });
+    return CKF.loading[k];
+  })).then(function () { var out = {}; ids.forEach(function (id) { out[id] = (CKF.shards[String(id)[0]] || {})[id] || null; }); return out; });
+}
+/* Cuántas copias de cada carta busca la tienda (wishlist de clientes), sin contar la wishlist de quien vende. */
+function buyWantedLeft(sellerUid) {
+  var w = Object.assign({}, db.wanted || {}), s = curStore();
+  var own = sellerUid && db.wishlists && db.wishlists[sellerUid] ? (db.wishlists[sellerUid][s.id] || []) : (db.buyer && !sellerUid ? wishOf(s.id) : []);
+  var seen = {};
+  own.forEach(function (id) { if (String(id).indexOf("p:") === 0) return; var p = db.catalog[id]; if (!p) return; var k = norm(p.name); if (seen[k]) return; seen[k] = 1; if (w[k] > 0) w[k]--; });
+  return w;
+}
+/* Convierte la lista del cliente en renglones con oferta. */
+function buyQuote(s, lines, mode, wantedLeft) {
+  var cfg = buySnap(s), left = Object.assign({}, wantedLeft || {}), items = [];
+  lines.forEach(function (l) {
+    var base = buyBase(l.ck, l.foil, cfg.fx), k = norm(l.name), q = Math.max(1, Number(l.qty) || 1);
+    var common = { sfid: l.sfid, name: l.name, set: l.set, num: l.num, setName: l.setName, img: l.img || null, foil: !!l.foil, cond: l.cond || "NM", lang: l.lang || "EN", base: base, include: true, src: l.id };
+    var wq = base != null && left[k] > 0 ? Math.min(q, left[k]) : 0;
+    if (wq) { left[k] -= wq; items.push(Object.assign({ id: l.id + "w", kind: "wish", qty: wq, unit: buyUnit(cfg, base, common.cond, true, mode) }, common)); }
+    var nq = q - wq; if (!nq) return;
+    var kind = base == null ? "sinprecio" : base < Number(cfg.bulkMax || 0) ? "bulk" : "normal";
+    items.push(Object.assign({ id: l.id + "n", kind: kind, qty: nq, unit: kind === "normal" ? buyUnit(cfg, base, common.cond, false, mode) : null }, common));
+  });
+  return { items: items, cfg: cfg };
+}
+function buyTotals(v) {
+  var cards = 0, bulkQ = 0, noPrice = 0, n = 0;
+  (v.items || []).forEach(function (it) {
+    if (!it.include) return; n += it.qty;
+    if (it.kind === "bulk") bulkQ += it.qty; else if (it.unit == null) noPrice += it.qty; else cards += it.unit * it.qty;
+  });
+  cards = r2(cards); var bulk = buyBulkTotal(v.cfg, bulkQ);
+  return { cards: cards, bulkQ: bulkQ, bulk: bulk, noPrice: noPrice, n: n, cash: v.mode === "pago" ? cards : 0, credit: r2((v.mode === "credito" ? cards : 0) + bulk), total: r2(cards + bulk) };
+}
+function buyExpired(v) { return v.validUntil && v.validUntil < todayISO() && (v.status === "pendiente" || v.status === "aprobada"); }
+function ventaNum(v) { return "V-" + String(v.number || 0).padStart(4, "0"); }
+function ocNum(o) { return "OC-" + String(o.number || 0).padStart(4, "0"); }
+
+/* ---------- Crédito en tienda ---------- */
+function creditMovesOf(c) { return (db.credits || []).filter(function (m) { return m.clientId === c.id && m.status !== "cancelado"; }); }
+function creditAvail(c) { return r2(creditMovesOf(c).reduce(function (a, m) { return a + (m.type === "abono" ? (m.status === "disponible" ? m.amount : 0) : -m.amount); }, 0)); }
+function creditPending(c) { return r2(creditMovesOf(c).reduce(function (a, m) { return a + (m.type === "abono" && m.status === "pendiente" ? m.amount : 0); }, 0)); }
+function creditAdd(c, type, amount, origin, ref, note, status) {
+  if (!db.credits) db.credits = [];
+  var m = { id: uid("cr"), storeId: c.storeId, clientId: c.id, type: type, amount: r2(amount), status: status || "disponible", origin: origin, ref: ref || "", note: note || "", at: Date.now(), by: tabAuditUser() };
+  db.credits.push(m); return m;
+}
+var CREDIT_ORIGIN = { venta: "Venta de cartas", pedido: "Pedido en línea", cuenta: "Cuenta en tienda", deuda: "Pago de saldo", ajuste: "Ajuste manual", devolucion: "Devolución" };
+function clientForUid(uid, buyer) {
+  var s = curStore(), em = buyer && (buyer.email || "").toLowerCase();
+  var c = clientsOf(s).filter(function (x) { return x.buyerId === uid || (em && (x.email || "").toLowerCase() === em); })[0];
+  if (!c && buyer) { c = { id: uid ? "cl-" + String(uid).slice(0, 12) : uid("cl"), storeId: s.id, name: buyer.name || em || "Cliente", phone: buyer.phone || "", email: em || "", buyerId: uid || null, source: "online", notes: "", createdAt: Date.now() }; db.clients.push(c); }
+  return c;
+}
+/* Crédito del cliente que tiene la sesión abierta en la tienda. */
+function myCredit() {
+  if (db.myCredit) return db.myCredit;
+  if (!db.buyer) return { avail: 0, pending: 0, moves: [] };
+  var c = clientsOf(curStore()).filter(function (x) { return x.buyerId === db.buyer.id || (x.email && x.email === db.buyer.email); })[0];
+  return c ? { avail: creditAvail(c), pending: creditPending(c), moves: creditMovesOf(c).slice(-30) } : { avail: 0, pending: 0, moves: [] };
+}
+/* Panel: aplica el crédito que el cliente usó en un pedido y lo regresa si el pedido se cancela. */
+function creditSyncOrders() {
+  var ch = false, s = curStore();
+  (db.orders || []).forEach(function (o) {
+    if (o.storeId !== s.id) return;
+    if (o.creditUsed > 0 && !o.creditDone && o.status !== "cancelado") {
+      var c = clientForUid(o.buyer && o.buyer.id, o.buyer), avail = c ? creditAvail(c) : 0, amt = r2(Math.min(o.creditUsed, avail, o.total));
+      if (amt > 0) {
+        creditAdd(c, "cargo", amt, "pedido", "#" + o.number, "Pagado con crédito");
+        o.payments = (o.payments || []).concat([{ id: uid("pay"), amount: amt, method: "Crédito en tienda", ref: "", note: "Crédito aplicado automáticamente", date: Date.now() }]);
+      }
+      o.creditApplied = amt; o.creditDone = true;
+      if (amt < o.creditUsed) o.creditNote = "El cliente pidió usar " + money(o.creditUsed) + " de crédito; solo tenía " + money(amt) + ".";
+      ch = true;
+    }
+    if (o.status === "cancelado" && o.creditApplied > 0 && !o.creditRefunded) {
+      var c2 = clientForUid(o.buyer && o.buyer.id, o.buyer);
+      if (c2) creditAdd(c2, "abono", o.creditApplied, "devolucion", "#" + o.number, "Pedido cancelado: se regresó el crédito");
+      o.creditRefunded = true; ch = true;
+    }
+  });
+  return ch;
+}
+
+/* ===================== TIENDA: Vende tus cartas ===================== */
+function sellState() {
+  if (!ui.sell) { var saved = null; try { saved = JSON.parse(localStorage.getItem("venta-borrador") || "null"); } catch (e) {} ui.sell = { lines: (saved && saved.lines) || [], mode: (saved && saved.mode) || "pago", q: "", sugg: [], pick: null, imp: null, view: "armar" }; }
+  return ui.sell;
+}
+function sellSave() { try { var S = sellState(); localStorage.setItem("venta-borrador", JSON.stringify({ lines: S.lines, mode: S.mode })); } catch (e) {} }
+function sellLoadPrices() {
+  var S = sellState(), miss = S.lines.filter(function (l) { return l.ck === undefined; });
+  if (!miss.length || S.loadingCk) return;
+  S.loadingCk = true;
+  ckFullGet(miss.map(function (l) { return l.sfid; })).then(function (m) { miss.forEach(function (l) { l.ck = m[l.sfid]; }); S.loadingCk = false; sellSave(); render(); });
+}
+function sellCreditBanner(s) {
+  if (!db.buyer) return "";
+  var c = myCredit(); if (!(c.avail > 0) && !(c.pending > 0)) return "";
+  return '<div class="panel row" style="gap:18px;justify-content:space-between"><div><span class="muted" style="font-size:13px">Tu crédito en ' + esc(s.name) + '</span><div class="price" style="font-size:26px">' + money(c.avail) + "</div></div>" +
+    (c.pending > 0 ? '<div class="holdnote" role="note" style="flex:1 1 280px;margin:0"><strong>Crédito pendiente de liberar: ' + money(c.pending) + "</strong><span>Lleva tus cartas a la tienda para que revisen y liberen tu crédito.</span></div>" : "") + "</div>";
+}
+function storeSell(s) {
+  var S = sellState(), b = buyCfg(s);
+  sellLoadPrices();
+  var tabs = '<div class="row" style="gap:8px"><button type="button" class="sbtn sm' + (S.view === "armar" ? " acc" : "") + '" data-act="sellView" data-v="armar">Vender cartas</button><button type="button" class="sbtn sm' + (S.view === "mis" ? " acc" : "") + '" data-act="sellView" data-v="mis">Mis solicitudes' + (myVentas().length ? " (" + myVentas().length + ")" : "") + "</button></div>";
+  var head = '<section class="stack"><div class="row" style="justify-content:space-between;gap:12px"><div><h2>Vende tus cartas</h2><p class="muted" style="margin:4px 0 0">Sube las cartas que ya no usas y te hacemos una oferta: en efectivo o en crédito para comprar en la tienda.</p></div>' + tabs + "</div>" + sellCreditBanner(s);
+  if (S.view === "mis") return head + sellMine(s) + "</section>";
+  if (S.done) {
+    var v = S.done;
+    return head + '<div class="panel stack"><span class="eyebrow">Solicitud enviada</span><h3 style="font-size:22px">' + esc(ventaNum(v)) + " · " + money(buyTotals(v).total) + "</h3>" +
+      '<div class="holdnote" role="note"><strong>Espera a que la tienda revise tu solicitud.</strong><span>Te avisaremos cuando esté aprobada. Después lleva tus cartas a la tienda para recibir tu ' + (v.mode === "pago" ? "pago" : "crédito") + ". La oferta es válida hasta el " + esc(fmtISO(v.validUntil)) + ".</span></div>" +
+      '<div class="row" style="gap:8px"><button type="button" class="sbtn" data-act="sellView" data-v="mis">Ver mis solicitudes</button><button type="button" class="sbtn acc" data-act="sellNew">Vender más cartas</button></div></div></section>';
+  }
+  var steps = '<ol class="muted" style="margin:0;padding-left:20px;line-height:1.7"><li>Agrega tus cartas una por una o con un Excel.</li><li>Ve la oferta y elige si quieres pago o crédito en tienda.</li><li>Envía tu solicitud y espera a que la tienda la apruebe.</li><li>Lleva tus cartas a la tienda: ahí las revisan y te entregan tu pago o liberan tu crédito.</li></ol>';
+  return head + '<div class="panel stack">' + steps + "</div>" + sellAddBox(s) + sellListHTML(s) + "</section>";
+}
+function sellAddBox(s) {
+  var S = sellState(), P = S.pick;
+  var search = '<div class="stack" style="gap:8px"><label class="flabel" for="sell-q">Busca la carta que quieres vender<input id="sell-q" class="sel" autocomplete="off" placeholder="Ej. Sol Ring" value="' + esc(S.q || "") + '" data-input="sellQ"></label><div id="sell-sugg" class="row" style="gap:6px;flex-wrap:wrap">' + sellSuggHTML() + "</div></div>";
+  var form = "";
+  if (P) {
+    if (P.loading) form = '<p class="muted" style="margin:0">Buscando versiones de ' + esc(P.name) + "…</p>";
+    else if (!P.prints.length) form = '<p class="muted" style="margin:0">No encontramos versiones de esa carta.</p>';
+    else {
+      var p = P.prints.filter(function (x) { return x.id === P.sel; })[0] || P.prints[0];
+      var hasFoil = p.finishes.some(function (f) { return f !== "normal"; }), hasNormal = p.finishes.indexOf("normal") >= 0;
+      var vers = P.prints.map(function (x) { return '<option value="' + esc(x.id) + '"' + (x.id === p.id ? " selected" : "") + ">" + esc(x.set + " #" + x.num + " · " + x.setName) + "</option>"; }).join("");
+      var conds = CONDS.map(function (c) { return '<option value="' + c + '"' + (P.cond === c ? " selected" : "") + ">" + c + " · " + COND_LABEL[c] + "</option>"; }).join("");
+      var langs = ["EN", "ES", "JA", "DE", "FR", "IT", "PT", "KO", "RU", "ZH"].map(function (l) { return '<option value="' + l + '"' + ((P.lang || "EN") === l ? " selected" : "") + ">" + langName(l) + "</option>"; }).join("");
+      form = '<div class="row" style="gap:16px;align-items:flex-start;flex-wrap:wrap"><div style="width:150px">' + cardImg(p, { foil: P.foil }) + "</div>" +
+        '<div class="stack" style="flex:1 1 300px;gap:10px"><strong style="font-size:18px">' + esc(p.name) + "</strong>" +
+        '<label class="flabel" for="sell-ver">Versión (expansión y arte)<select id="sell-ver" class="sel" data-change="sellPick">' + vers + "</select></label>" +
+        '<div class="fgrid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))"><label class="flabel" for="sell-cond">Estado<select id="sell-cond" class="sel" data-change="sellOpt" data-k="cond">' + conds + "</select></label>" +
+        '<label class="flabel" for="sell-lang">Idioma<select id="sell-lang" class="sel" data-change="sellOpt" data-k="lang">' + langs + "</select></label>" +
+        '<label class="flabel" for="sell-qty">Cantidad<input id="sell-qty" class="sel" type="number" min="1" value="' + (P.qty || 1) + '" data-change="sellOpt" data-k="qty"></label></div>' +
+        (hasFoil ? '<label class="row" style="gap:10px;min-height:40px" for="sell-foil"><input id="sell-foil" type="checkbox" data-change="sellOpt" data-k="foil" style="width:20px;height:20px;accent-color:var(--s-accent)"' + (P.foil || !hasNormal ? " checked" : "") + (hasNormal ? "" : " disabled") + "> Es foil</label>" : "") +
+        '<div class="row" style="gap:8px"><button type="button" class="sbtn acc" data-act="sellAdd">Agregar a mi lista</button><button type="button" class="sbtn" data-act="sellCancelPick">Cancelar</button></div></div></div>';
+    }
+  }
+  var excel = '<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><span class="muted" style="font-size:14px">¿Tienes muchas? </span><button type="button" class="sbtn sm" data-act="sellTemplate">Descargar Excel para llenar</button>' +
+    '<label class="sbtn sm" for="sell-file" style="cursor:pointer">Cargar mi Excel (CSV)</label><input id="sell-file" type="file" accept=".csv,text/csv" class="sr" data-change="sellFile"></div>' +
+    (S.imp ? '<p class="muted" style="margin:0" id="sell-imp">' + esc(S.imp.msg || "") + "</p>" + (S.imp.errors && S.imp.errors.length ? '<ul style="margin:0;padding-left:18px;color:var(--s-accent-text);font-size:13px">' + S.imp.errors.slice(0, 20).map(function (e) { return "<li>" + esc(e) + "</li>"; }).join("") + "</ul>" : "") : "");
+  return '<div class="panel stack">' + search + form + excel + "</div>";
+}
+function sellSuggHTML() {
+  var S = sellState();
+  return (S.sugg || []).slice(0, 10).map(function (n) { return '<button type="button" class="chip" data-act="sellName" data-name="' + esc(n) + '">' + esc(n) + "</button>"; }).join("");
+}
+function sellListHTML(s) {
+  var S = sellState(); if (!S.lines.length) return "";
+  var Q = buyQuote(s, S.lines, S.mode, buyWantedLeft(null)), v = { items: Q.items, cfg: Q.cfg, mode: S.mode }, T = buyTotals(v);
+  var loading = S.lines.some(function (l) { return l.ck === undefined; });
+  var cards = Q.items.filter(function (i) { return i.kind !== "bulk"; }), bulk = Q.items.filter(function (i) { return i.kind === "bulk"; });
+  var row = function (it) {
+    var tag = it.kind === "wish" ? ' <span class="tag" style="background:var(--s-accent);color:var(--s-on-accent,#111);border-color:transparent">¡La tienda la busca!</span>' : it.kind === "sinprecio" ? ' <span class="tag">La tienda te hará oferta</span>' : "";
+    return '<div class="cart-row">' + thumb({ img: it.img, name: it.name, color: "C" }) + '<div style="flex:1 1 220px;min-width:0"><strong>' + esc(it.name) + "</strong>" + tag + '<br><span class="code">' + esc(it.set + " · #" + it.num + (it.foil ? " · Foil" : "") + " · " + it.cond + langSuffix(it.lang)) + "</span></div>" +
+      '<span class="muted num" style="min-width:60px">× ' + it.qty + '</span><span class="price" style="min-width:110px;text-align:right">' + (it.unit == null ? "—" : money(it.unit * it.qty)) + "</span>" +
+      '<button type="button" class="sbtn sm" data-act="sellDel" data-id="' + esc(it.src) + '">Quitar</button></div>';
+  };
+  var bulkBox = bulk.length ? '<details class="panel" style="margin-top:4px"><summary class="row" style="justify-content:space-between;cursor:pointer"><span><strong>Bulk · ' + T.bulkQ + (T.bulkQ === 1 ? " carta" : " cartas") + '</strong> <span class="muted" style="font-size:13px">(valen menos de ' + money(Q.cfg.bulkMax) + " · se pagan " + money(Q.cfg.bulkPrice) + " por cada " + Q.cfg.bulkPer + ")</span></span><span class=\"price\">" + money(T.bulk) + ' <span class="muted" style="font-size:12px">en crédito</span></span></summary><div style="margin-top:10px">' + bulk.map(row).join("") + "</div></details>" : "";
+  var modeBox = '<div class="stack" style="gap:8px"><strong>¿Cómo quieres recibir el pago?</strong><div class="row" style="gap:8px">' +
+    '<button type="button" class="sbtn' + (S.mode === "pago" ? " acc" : "") + '" data-act="sellMode" data-m="pago" aria-pressed="' + (S.mode === "pago") + '">Pago en efectivo</button>' +
+    '<button type="button" class="sbtn' + (S.mode === "credito" ? " acc" : "") + '" data-act="sellMode" data-m="credito" aria-pressed="' + (S.mode === "credito") + '">Crédito en tienda' + (Q.cfg.bonus > 0 ? " (+" + Q.cfg.bonus + "%)" : "") + "</button></div>" +
+    '<span class="muted" style="font-size:13px">Aplica a todas tus cartas de esta solicitud. El bulk siempre se paga en crédito.</span></div>';
+  var tot = '<div class="stack" style="gap:4px;min-width:240px">' +
+    (T.cards ? '<div class="row" style="justify-content:space-between"><span>Cartas (' + (S.mode === "pago" ? "efectivo" : "crédito") + ')</span><strong class="mono">' + money(T.cards) + "</strong></div>" : "") +
+    (T.bulkQ ? '<div class="row" style="justify-content:space-between"><span>Bulk (crédito)</span><strong class="mono">' + money(T.bulk) + "</strong></div>" : "") +
+    (T.noPrice ? '<div class="row" style="justify-content:space-between"><span>Sin precio</span><span class="muted">la tienda te hará oferta</span></div>' : "") +
+    '<div class="row" style="justify-content:space-between;border-top:1px solid var(--s-border);padding-top:6px"><span>Total de la oferta</span><span class="price" style="font-size:26px">' + money(T.total) + "</span></div></div>";
+  return '<section class="stack"><div class="row" style="justify-content:space-between"><h3 style="font-size:20px">Tu lista · ' + T.n + (T.n === 1 ? " carta" : " cartas") + "</h3>" + (loading ? '<span class="muted">Consultando precios…</span>' : "") + '<button type="button" class="sbtn sm" data-act="sellClear">Vaciar lista</button></div>' +
+    (cards.length ? '<div class="panel">' + cards.map(row).join("") + "</div>" : "") + bulkBox +
+    '<div class="panel row" style="gap:18px;justify-content:space-between;align-items:flex-end">' + modeBox + tot + "</div>" +
+    '<div class="row" style="justify-content:flex-end;gap:10px"><span class="muted" style="font-size:13px;max-width:460px">Los precios son una oferta sujeta a revisión: la tienda confirma estado, versión y foil cuando lleves tus cartas.</span><button type="button" class="sbtn acc" data-act="sellSend"' + (loading ? " disabled" : "") + ">" + (db.buyer ? "Enviar solicitud" : "Entrar con Google y enviar") + "</button></div></section>";
+}
+function myVentas() { var s = curStore(); return (db.ventas || []).filter(function (v) { return v.storeId === s.id && db.buyer && (v.uid === db.buyer.id || (v.buyer && v.buyer.email === db.buyer.email)); }).sort(function (a, b) { return b.createdAt - a.createdAt; }); }
+function sellMine(s) {
+  if (!db.buyer) return '<div class="empty">Entra con tu cuenta para ver tus solicitudes. <button type="button" class="sbtn sm acc" data-act="loginBuyer" style="margin-left:8px">Entrar con Google</button></div>';
+  var list = myVentas();
+  if (!list.length) return '<div class="empty">Aún no has enviado solicitudes de venta.</div>';
+  return list.map(function (v) {
+    var T = buyTotals(v), st = BUY_STATUS[v.status] || BUY_STATUS.pendiente;
+    var note = v.status === "aprobada" ? '<div class="holdnote" role="note"><strong>Lleva tus cartas a la tienda' + (v.validUntil ? " antes del " + esc(fmtISO(v.validUntil)) : "") + ".</strong><span>Ahí las revisan y " + (v.mode === "pago" ? "te pagan" : "se libera tu crédito") + ". Mientras tanto tu crédito aparece como pendiente de liberar.</span></div>"
+      : v.status === "rechazada" && v.rejectReason ? '<p class="muted" style="margin:0">Motivo: ' + esc(v.rejectReason) + "</p>" : "";
+    var rows = (v.items || []).filter(function (i) { return i.include; }).map(function (it) { return "<tr><td>" + esc(it.name) + '<br><span class="code">' + esc(it.set + " #" + it.num + (it.foil ? " · Foil" : "") + " · " + it.cond) + "</span></td><td>" + esc(KIND_LABEL[it.kind]) + '</td><td class="num">' + it.qty + '</td><td class="num">' + (it.kind === "bulk" ? "—" : it.unit == null ? "Por definir" : money(it.unit * it.qty)) + "</td></tr>"; }).join("");
+    return '<details class="panel bord"' + (v.status === "aprobada" ? " open" : "") + '><summary class="row" style="justify-content:space-between;cursor:pointer"><span><strong class="mono">' + esc(ventaNum(v)) + '</strong> <span class="muted">' + fmtDay(v.createdAt) + " · " + (v.mode === "pago" ? "Pago en efectivo" : "Crédito en tienda") + "</span></span>" +
+      '<span class="row" style="gap:12px"><span class="status">' + esc(st.client) + '</span><span class="price">' + money(T.total) + "</span></span></summary>" +
+      '<div class="stack" style="margin-top:12px;gap:10px">' + note + '<div class="tbl-box"><table class="tbl"><thead><tr><th>Carta</th><th>Tipo</th><th class="num">Cant.</th><th class="num">Oferta</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
+      (T.bulkQ ? '<p style="margin:0">Bulk: ' + T.bulkQ + " cartas → " + money(T.bulk) + " en crédito</p>" : "") + "</div></details>";
+  }).join("");
+}
+/* Scryfall: sugerencias de nombre y versiones. */
+var sellSuggTimer = null;
+function sellPickName(name) {
+  var S = sellState();
+  S.pick = { name: name, loading: true, prints: [], sel: null, cond: "NM", lang: "EN", qty: 1, foil: false }; S.sugg = []; S.q = name; render();
+  scryfallPrints(name).then(function (ps) {
+    if (!S.pick || S.pick.name !== name) return;
+    ps.sort(function (a, b) { var pa = minUsd(a), pb = minUsd(b); return (pa == null) - (pb == null) || (pa || 0) - (pb || 0); });
+    S.pick.prints = ps; S.pick.sel = ps[0] ? ps[0].id : null; S.pick.loading = false; render();
+  }).catch(function () { if (S.pick) { S.pick.loading = false; S.pick.prints = []; render(); } });
+}
+function minUsd(p) { var t = p.prices && p.prices.tcgplayer || {}, v = [t.normal, t.foil, t.etched].filter(function (x) { return x != null; }); return v.length ? Math.min.apply(null, v) : null; }
+function sellLineFrom(p, opt) {
+  var hasNormal = p.finishes.indexOf("normal") >= 0;
+  return { id: uid("sl"), sfid: p.id, name: p.name, set: p.set, num: p.num, setName: p.setName, img: p.img, finishes: p.finishes, foil: !!opt.foil || !hasNormal, cond: opt.cond || "NM", lang: opt.lang || "EN", qty: Math.max(1, Number(opt.qty) || 1) };
+}
+Object.assign(INPUT, {
+  sellQ: function (el) {
+    var S = sellState(); S.q = el.value; clearTimeout(sellSuggTimer);
+    var q = el.value.trim(); if (q.length < 2) { S.sugg = []; var b0 = document.getElementById("sell-sugg"); if (b0) b0.innerHTML = ""; return; }
+    sellSuggTimer = setTimeout(function () {
+      sfFetch("https://api.scryfall.com/cards/autocomplete?q=" + encodeURIComponent(q)).then(function (r) { S.sugg = r.data || []; var b = document.getElementById("sell-sugg"); if (b) b.innerHTML = sellSuggHTML(); }).catch(function () {});
+    }, 250);
+  }
+});
+Object.assign(CHANGE, {
+  sellPick: function (el) { var P = sellState().pick; if (P) { P.sel = el.value; var p = P.prints.filter(function (x) { return x.id === el.value; })[0]; if (p && p.finishes.indexOf("normal") < 0) P.foil = true; render(); } },
+  sellOpt: function (el) { var P = sellState().pick; if (!P) return; var k = el.dataset.k; P[k] = k === "foil" ? el.checked : k === "qty" ? Math.max(1, Number(el.value) || 1) : el.value; if (k === "foil") render(); },
+  sellFile: function (el) {
+    var f = el.files && el.files[0]; if (!f) return;
+    if (/\.xlsx?$/i.test(f.name)) { sellState().imp = { msg: "Guarda tu Excel como CSV (Archivo → Guardar como → CSV) y súbelo de nuevo.", errors: [] }; render(); return; }
+    var r = new FileReader(); r.onload = function () { sellImport(String(r.result || "")); }; r.readAsText(f);
+  }
+});
+Object.assign(ACT, {
+  sellView: function (el) { var S = sellState(); S.view = el.dataset.v; S.done = null; render(); },
+  sellNew: function () { var S = sellState(); S.done = null; S.view = "armar"; render(); },
+  sellName: function (el) { sellPickName(el.dataset.name); },
+  sellCancelPick: function () { var S = sellState(); S.pick = null; S.q = ""; render(); },
+  sellAdd: function () {
+    var S = sellState(), P = S.pick; if (!P || !P.prints.length) return;
+    var p = P.prints.filter(function (x) { return x.id === P.sel; })[0] || P.prints[0];
+    var q = document.getElementById("sell-qty"); if (q) P.qty = Math.max(1, Number(q.value) || 1);
+    S.lines.push(sellLineFrom(p, P)); S.pick = null; S.q = ""; sellSave(); render(); toast(p.name + " agregada");
+  },
+  sellDel: function (el) { var S = sellState(); S.lines = S.lines.filter(function (l) { return l.id !== el.dataset.id; }); sellSave(); render(); },
+  sellClear: function () { var S = sellState(); S.lines = []; sellSave(); render(); },
+  sellMode: function (el) { var S = sellState(); S.mode = el.dataset.m; sellSave(); render(); },
+  sellTemplate: function () {
+    downloadText("vender-cartas-plantilla.csv", "nombre,set,numero,foil,condicion,idioma,cantidad\nSol Ring,CMM,410,no,NM,EN,1\nLightning Bolt,,,no,LP,EN,2\n");
+    toast("Plantilla descargada. Llénala y guárdala como CSV.");
+  },
+  sellSend: function () {
+    var S = sellState(), s = curStore();
+    if (!S.lines.length) return;
+    if (!db.buyer) { if (typeof fbSignIn === "function") { FB.then = null; fbSignIn(); } else openModal({ type: "login" }); toast("Entra con tu cuenta y vuelve a enviar"); return; }
+    var Q = buyQuote(s, S.lines, S.mode, buyWantedLeft(null));
+    var b = buyCfg(s), until = new Date(Date.now() + (Number(b.validDays) || 7) * 864e5);
+    var v = { id: uid("ven"), storeId: s.id, uid: db.buyer.id, buyer: { id: db.buyer.id, name: db.buyer.name, email: db.buyer.email, phone: db.buyer.phone || "" }, mode: S.mode, items: Q.items, cfg: Q.cfg, status: "pendiente", createdAt: Date.now(), validUntil: isoDay(until), log: [{ date: Date.now(), text: "Solicitud enviada por el cliente" }] };
+    var done = function (vv) { S.lines = []; sellSave(); S.done = vv; render(); window.scrollTo(0, 0); };
+    if (typeof fbSubmitVenta === "function") { toast("Enviando tu solicitud…"); fbSubmitVenta(v).then(done).catch(function () { toast("No se pudo enviar. Revisa tu conexión e inténtalo de nuevo."); }); }
+    else { db.ventas = db.ventas || []; db.ventaSeq = (db.ventaSeq || 0) + 1; v.number = db.ventaSeq; db.ventas.push(v); saveDB(); done(v); }
+  }
+});
+/* Excel del cliente: nombre, set, número, foil, condición, idioma, cantidad. Sin set/número se toma la versión más barata. */
+function sellImport(text) {
+  var S = sellState(), rows = parseCSV(text); if (!rows.length) return;
+  var head = rows[0].map(function (h) { return norm(h); }), col = function (names) { for (var i = 0; i < head.length; i++) if (names.indexOf(head[i]) >= 0) return i; return -1; };
+  var ix = { name: col(["nombre", "name", "carta"]), set: col(["set", "edicion", "expansion"]), num: col(["numero", "number", "num", "#"]), foil: col(["foil", "acabado"]), cond: col(["condicion", "condition", "estado"]), lang: col(["idioma", "language", "lang"]), qty: col(["cantidad", "quantity", "qty"]) };
+  if (ix.name < 0) { S.imp = { msg: "El archivo debe tener una columna «nombre».", errors: [] }; render(); return; }
+  var data = rows.slice(1).filter(function (r) { return r.some(function (x) { return String(x).trim(); }); });
+  S.imp = { msg: "Leyendo " + data.length + " filas…", errors: [] }; render();
+  var g = function (r, k) { return ix[k] >= 0 ? String(r[ix[k]] || "").trim() : ""; }, added = 0;
+  data.reduce(function (pr, r, n) {
+    return pr.then(function () {
+      var name = g(r, "name"), set = g(r, "set").toLowerCase(), num = g(r, "num"), line = n + 2;
+      if (!name) { S.imp.errors.push("Fila " + line + ": falta el nombre"); return; }
+      var opt = { foil: mapFoil(g(r, "foil")) !== "normal", cond: mapCond(g(r, "cond")) || "NM", lang: (g(r, "lang") || "EN").toUpperCase().slice(0, 2), qty: parseInt(g(r, "qty"), 10) || 1 };
+      var get = set && num ? sfFetch("https://api.scryfall.com/cards/" + encodeURIComponent(set) + "/" + encodeURIComponent(num)).then(function (c) { return [fromScryfall(c)]; }) : scryfallPrints(name);
+      return get.then(function (ps) {
+        if (!ps.length) throw new Error("x");
+        if (!(set && num)) ps.sort(function (a, b) { var pa = minUsd(a), pb = minUsd(b); return (pa == null) - (pb == null) || (pa || 0) - (pb || 0); });
+        S.lines.push(sellLineFrom(ps[0], opt)); added++;
+        var el = document.getElementById("sell-imp"); if (el) el.textContent = "Cargando… " + added + " de " + data.length;
+      }).catch(function () { S.imp.errors.push("Fila " + line + ": no encontramos «" + name + "»" + (set ? " (" + set.toUpperCase() + " #" + num + ")" : "")); })
+        .then(function () { return new Promise(function (ok) { setTimeout(ok, 110); }); });
+    });
+  }, Promise.resolve()).then(function () {
+    S.imp.msg = added + " cartas agregadas a tu lista" + (S.imp.errors.length ? " · " + S.imp.errors.length + " filas con problema:" : "."); sellSave(); render();
+  });
+}
+
+/* ===================== PANEL: Compras a clientes ===================== */
+function ventasOf(s) { return (db.ventas || []).filter(function (v) { return v.storeId === s.id; }); }
+function posOf(s) { return (db.pos || []).filter(function (o) { return o.storeId === s.id; }); }
+function buyPendingCount(s) { return ventasOf(s).filter(function (v) { return v.status === "pendiente"; }).length; }
+function admBuy(s) {
+  var t = ui.buyTab || "sol";
+  if (ui.buyId) { var v = ventasOf(s).filter(function (x) { return x.id === ui.buyId; })[0]; if (v) return admBuyDetail(s, v); ui.buyId = null; }
+  var seg = function (id, l, n) { return '<button type="button" data-act="buyTab" data-t="' + id + '" aria-pressed="' + (t === id) + '">' + l + (n ? ' <span class="pill warn" style="padding:0 6px">' + n + "</span>" : "") + "</button>"; };
+  var porPagar = posOf(s).filter(function (o) { return o.status === "por_pagar"; }).length;
+  return '<div class="head"><div><h1>Compras a clientes</h1><p class="muted" style="margin:0">Las cartas que tus clientes te quieren vender desde «Vende tus cartas».</p></div></div>' +
+    '<div class="seg" role="group" aria-label="Sección">' + seg("sol", "Solicitudes", buyPendingCount(s)) + seg("oc", "Órdenes de compra", porPagar) + seg("cfg", "Configuración") + "</div>" +
+    (t === "oc" ? admPOs(s) : t === "cfg" ? admBuyCfg(s) : admBuyList(s));
+}
+function admBuyList(s) {
+  var F = ui.buyF || "abiertas", all = ventasOf(s).sort(function (a, b) { return b.createdAt - a.createdAt; });
+  var list = all.filter(function (v) { return F === "todas" ? true : F === "abiertas" ? (v.status === "pendiente" || v.status === "aprobada") : v.status === F; });
+  var opt = function (v, l) { return '<option value="' + v + '"' + (F === v ? " selected" : "") + ">" + l + "</option>"; };
+  var rows = list.map(function (v) {
+    var T = buyTotals(v), st = BUY_STATUS[v.status], exp = buyExpired(v);
+    return '<tr><td><button type="button" class="linkbtn" data-act="buyOpen" data-id="' + v.id + '" style="font-weight:600;text-decoration:none">' + esc(ventaNum(v)) + "</button></td><td>" + esc(v.buyer ? v.buyer.name : "") + '</td><td class="muted" style="font-size:13px">' + fmtDay(v.createdAt) + "</td>" +
+      '<td class="num">' + T.n + (T.bulkQ ? ' <span class="muted" style="font-size:12px">(' + T.bulkQ + " bulk)</span>" : "") + "</td><td>" + (v.mode === "pago" ? "Pago" : "Crédito") + '</td><td class="num" style="text-align:right;font-weight:600">' + money(T.total) + "</td>" +
+      '<td><span class="pill ' + st.cls + '">' + st.label + "</span></td>" +
+      '<td style="font-size:13px' + (exp ? ";color:var(--bad);font-weight:700" : "") + '">' + (v.validUntil ? fmtISO(v.validUntil) : "—") + (exp ? " · vencida" : "") + '</td><td><button type="button" class="btn sm" data-act="buyOpen" data-id="' + v.id + '">Revisar</button></td></tr>';
+  }).join("");
+  return '<div class="row" style="gap:10px"><label class="field" for="buy-f" style="max-width:260px">Mostrar<select id="buy-f" data-change="buyF">' + opt("abiertas", "Abiertas (por revisar y por recibir)") + opt("pendiente", "Pendientes de revisión") + opt("aprobada", "Aprobadas, por recibir") + opt("completada", "Recibidas") + opt("rechazada", "Rechazadas") + opt("todas", "Todas") + "</select></label></div>" +
+    '<div class="tbl-box"><table class="tbl" style="min-width:900px"><thead><tr><th>Solicitud</th><th>Cliente</th><th>Fecha</th><th class="num">Cartas</th><th>Modalidad</th><th style="text-align:right">Oferta</th><th>Estado</th><th>Vigencia</th><th></th></tr></thead><tbody>' +
+    (rows || '<tr><td colspan="9" class="muted" style="text-align:center;padding:24px">No hay solicitudes con este filtro.</td></tr>') + "</tbody></table></div>";
+}
+function admBuyDetail(s, v) {
+  var T = buyTotals(v), st = BUY_STATUS[v.status], edit = v.status === "pendiente" || v.status === "aprobada", exp = buyExpired(v);
+  var c = clientForUid(v.uid, null);
+  var groups = [["wish", "En wishlist de tus clientes"], ["normal", "Cartas"], ["sinprecio", "Sin precio en Card Kingdom: pon tú la oferta"], ["bulk", "Bulk"]];
+  var condSel = function (it) { return '<select class="dsel" data-change="buyItem" data-id="' + it.id + '" data-k="cond"' + (edit ? "" : " disabled") + ">" + CONDS.map(function (cc) { return '<option value="' + cc + '"' + (it.cond === cc ? " selected" : "") + ">" + cc + "</option>"; }).join("") + "</select>"; };
+  var sec = groups.map(function (g) {
+    var its = (v.items || []).filter(function (i) { return i.kind === g[0]; }); if (!its.length) return "";
+    var rows = its.map(function (it) {
+      return '<tr class="' + (it.include ? "" : "muted") + '"><td><label class="row" style="gap:8px;flex-wrap:nowrap"><input type="checkbox" data-change="buyItem" data-id="' + it.id + '" data-k="include"' + (it.include ? " checked" : "") + (edit ? "" : " disabled") + ' style="width:18px;height:18px"><span><strong>' + esc(it.name) + '</strong><br><span class="mono muted" style="font-size:12px">' + esc(it.set + " #" + it.num + langSuffix(it.lang)) + "</span></span></label></td>" +
+        "<td>" + (edit ? '<button type="button" class="btn sm" data-act="buyVersion" data-id="' + it.id + '">Cambiar versión</button>' : "") + "</td>" +
+        '<td><label class="row" style="gap:6px"><input type="checkbox" data-change="buyItem" data-id="' + it.id + '" data-k="foil"' + (it.foil ? " checked" : "") + (edit ? "" : " disabled") + ' style="width:18px;height:18px">Foil</label></td>' +
+        "<td>" + condSel(it) + '</td><td><input type="number" min="0" class="mono dsel" style="width:70px" value="' + it.qty + '" data-change="buyItem" data-id="' + it.id + '" data-k="qty"' + (edit ? "" : " disabled") + "></td>" +
+        '<td class="num muted" style="font-size:13px">' + (it.base == null ? "—" : money(it.base)) + "</td>" +
+        (g[0] === "bulk" ? '<td class="muted" style="font-size:13px">Precio de bulk</td><td></td>' :
+          '<td><input type="number" min="0" step="0.5" class="mono dsel" style="width:96px" value="' + (it.unit == null ? "" : it.unit) + '" placeholder="Oferta" data-change="buyItem" data-id="' + it.id + '" data-k="unit"' + (edit ? "" : " disabled") + ">" + (it.manual ? ' <span class="pill" style="font-size:11px">manual</span>' : "") + '</td><td class="num" style="text-align:right;font-weight:600">' + (it.unit == null ? "—" : money(it.unit * it.qty)) + "</td>") + "</tr>";
+    }).join("");
+    var extra = g[0] === "bulk" ? '<p class="muted" style="margin:0;font-size:13px">' + T.bulkQ + " cartas de bulk × " + money(v.cfg.bulkPrice) + " por cada " + v.cfg.bulkPer + " = <strong>" + money(T.bulk) + "</strong> en crédito.</p>" : "";
+    if (g[0] === "wish") extra = '<p class="muted" style="margin:0;font-size:13px">Se pagan con el % de wishlist. Si otra solicitud ya cubrió lo que buscaban tus clientes, ajusta el precio.</p>';
+    return '<section class="card stack"><h2 style="font-size:17px">' + g[1] + " (" + its.length + ")</h2>" + extra +
+      '<div class="tbl-box"><table class="tbl" style="min-width:880px"><thead><tr><th>Carta</th><th></th><th>Foil</th><th>Estado</th><th>Cant.</th><th class="num">CK en pesos</th><th>Oferta c/u</th><th style="text-align:right">Subtotal</th></tr></thead><tbody>' + rows + "</tbody></table></div></section>";
+  }).join("");
+  var cr = c ? creditAvail(c) : 0;
+  var actions = v.status === "pendiente" ? '<button type="button" class="btn" data-act="buyReject">Rechazar</button><button type="button" class="btn pri" data-act="buyApprove"' + (T.noPrice ? " disabled title=\"Pon oferta a las cartas sin precio o desmárcalas\"" : "") + ">Aprobar oferta</button>"
+    : v.status === "aprobada" ? '<button type="button" class="btn" data-act="buyReject">Cancelar</button><button type="button" class="btn pri" data-act="buyReceive"' + (T.noPrice ? " disabled" : "") + ">Recibir cartas y liberar</button>" : "";
+  return '<div class="head"><div><button type="button" class="backbtn" data-act="buyBack"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Regresar a solicitudes</button>' +
+    '<h1 style="margin-top:6px">' + esc(ventaNum(v)) + " · " + esc(v.buyer ? v.buyer.name : "") + '</h1><p class="muted" style="margin:0">' + [v.buyer && v.buyer.phone, v.buyer && v.buyer.email, "enviada " + fmtDay(v.createdAt)].filter(Boolean).map(esc).join(" · ") + (c ? ' · <button type="button" class="linkbtn" data-act="clientOpen" data-id="' + c.id + '">ver cliente</button>' : "") + "</p></div>" +
+    '<div class="row" style="gap:8px">' + actions + "</div></div>" +
+    '<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">' +
+    '<div class="kpi"><span>Estado</span><strong style="font-size:18px">' + st.label + "</strong></div>" +
+    '<div class="kpi"><span>Modalidad</span><strong style="font-size:18px">' + (v.mode === "pago" ? "Pago en efectivo" : "Crédito en tienda") + "</strong>" + (v.cfg.bonus > 0 && v.mode === "credito" ? '<span class="muted" style="font-size:12px">incluye bono de ' + v.cfg.bonus + "%</span>" : "") + "</div>" +
+    '<div class="kpi"><span>' + (v.mode === "pago" ? "A pagar en efectivo" : "Cartas en crédito") + "</span><strong>" + money(T.cards) + "</strong></div>" +
+    '<div class="kpi"><span>Bulk en crédito</span><strong>' + money(T.bulk) + '</strong><span class="muted" style="font-size:12px">' + T.bulkQ + " cartas</span></div>" +
+    '<div class="kpi"><span>Total de la oferta</span><strong style="color:var(--ok)">' + money(T.total) + "</strong></div></div>" +
+    '<div class="row" style="gap:12px;align-items:flex-end"><label class="field" for="buy-valid" style="max-width:220px">Vigencia de la oferta<input id="buy-valid" type="date" value="' + esc(v.validUntil || "") + '" data-change="buyValid"' + (edit ? "" : " disabled") + (exp ? ' style="border-color:var(--bad);color:var(--bad);font-weight:700"' : "") + "></label>" +
+    (exp ? '<span class="pill bad" style="white-space:normal;border-radius:8px">La vigencia ya pasó: decide si mantienes los precios o los cambias.</span>' : "") +
+    (c ? '<span class="muted" style="font-size:13px">Crédito actual del cliente: <strong>' + money(cr) + "</strong></span>" : "") + "</div>" +
+    (T.noPrice ? '<p class="pill warn" style="white-space:normal;border-radius:8px;margin:0">Hay ' + T.noPrice + " cartas sin precio: escribe tu oferta o desmárcalas para poder continuar.</p>" : "") +
+    (v.rejectReason ? '<p class="muted" style="margin:0">Motivo de rechazo: ' + esc(v.rejectReason) + "</p>" : "") + sec +
+    '<section class="card stack"><h2 style="font-size:17px">Historial</h2><ul style="margin:0;padding-left:18px">' + (v.log || []).map(function (l) { return "<li><span class=\"muted\">" + fmtDay(l.date) + "</span> · " + esc(l.text) + "</li>"; }).join("") + "</ul></section>";
+}
+/* Al cambiar la venta se actualizan su orden de compra y su crédito pendiente. */
+function buySyncLinks(v) {
+  var T = buyTotals(v), s = curStore();
+  var oc = v.ocId && (db.pos || []).filter(function (o) { return o.id === v.ocId; })[0];
+  if (oc && oc.status === "pendiente_entrega") oc.amount = T.cash;
+  var cm = v.creditId && (db.credits || []).filter(function (m) { return m.id === v.creditId; })[0];
+  if (cm && cm.status === "pendiente") cm.amount = T.credit;
+}
+function buyRecalc(v, it) {
+  if (it.manual || it.kind === "bulk") return;
+  it.unit = buyUnit(v.cfg, it.base, it.cond, it.kind === "wish", v.mode);
+}
+function curVenta() { return (db.ventas || []).filter(function (x) { return x.id === ui.buyId; })[0]; }
+function buyLog(v, text) { v.log = (v.log || []).concat([{ date: Date.now(), text: text, by: tabAuditUser() }]); }
+Object.assign(ACT, {
+  buyTab: function (el) { ui.buyTab = el.dataset.t; ui.buyId = null; render(); },
+  buyOpen: function (el) { ui.adminTab = "compras"; ui.buyTab = "sol"; ui.buyId = el.dataset.id; render(); window.scrollTo(0, 0); },
+  buyBack: function () { ui.buyId = null; render(); },
+  buyApprove: function () {
+    var v = curVenta(), s = curStore(); if (!v) return;
+    var T = buyTotals(v), c = clientForUid(v.uid, v.buyer);
+    if (T.cash > 0) {
+      db.pos = db.pos || []; db.posSeq = (db.posSeq || posOf(s).length) + 1;
+      var oc = { id: uid("oc"), number: db.posSeq, storeId: s.id, ventaId: v.id, clientId: c.id, amount: T.cash, status: "pendiente_entrega", createdAt: Date.now(), payments: [] };
+      db.pos.push(oc); v.ocId = oc.id;
+    }
+    if (T.credit > 0) { var m = creditAdd(c, "abono", T.credit, "venta", ventaNum(v), "Pendiente de liberar: el cliente debe llevar sus cartas", "pendiente"); v.creditId = m.id; }
+    v.status = "aprobada"; v.reviewedAt = Date.now(); buyLog(v, "Oferta aprobada por " + money(T.total) + (T.cash ? " · orden de compra por " + money(T.cash) : "") + (T.credit ? " · crédito pendiente de liberar " + money(T.credit) : ""));
+    auditLog(s.id, "Compras a clientes", "Aprobó la solicitud " + ventaNum(v) + " de " + (v.buyer ? v.buyer.name : "") + " por " + money(T.total), tabAuditUser());
+    saveDB(); render(); toast("Solicitud aprobada. El cliente verá que debe llevar sus cartas.");
+  },
+  buyReceive: function () { openModal({ type: "buyReceive", id: ui.buyId }); },
+  buyReceiveDo: function () {
+    var v = curVenta(), s = curStore(); if (!v) return;
+    buySyncLinks(v); var T = buyTotals(v);
+    var oc = v.ocId && db.pos.filter(function (o) { return o.id === v.ocId; })[0];
+    if (oc) { oc.amount = T.cash; oc.status = T.cash > 0 ? "por_pagar" : "cancelada"; oc.receivedAt = Date.now(); }
+    var cm = v.creditId && db.credits.filter(function (m) { return m.id === v.creditId; })[0];
+    if (cm) { cm.amount = T.credit; cm.status = T.credit > 0 ? "disponible" : "cancelado"; cm.note = "Cartas recibidas en tienda"; cm.at = Date.now(); }
+    v.status = "completada"; v.receivedAt = Date.now(); buyLog(v, "Cartas recibidas. " + (T.cash ? "Por pagar: " + money(T.cash) + ". " : "") + (T.credit ? "Crédito liberado: " + money(T.credit) + "." : ""));
+    auditLog(s.id, "Compras a clientes", "Recibió las cartas de " + ventaNum(v) + (T.credit ? " y liberó " + money(T.credit) + " de crédito" : "") + (T.cash ? " · orden de compra por pagar " + money(T.cash) : ""), tabAuditUser());
+    ui.modal = null; saveDB(); render(); toast(T.credit ? "Crédito liberado: " + money(T.credit) : "Cartas recibidas. La orden de compra quedó por pagar.");
+  },
+  buyReject: function () { openModal({ type: "buyReject", id: ui.buyId }); },
+  buyRejectDo: function () {
+    var v = curVenta(), s = curStore(); if (!v) return;
+    var why = (document.getElementById("br-why") || {}).value || "";
+    var oc = v.ocId && (db.pos || []).filter(function (o) { return o.id === v.ocId; })[0]; if (oc) oc.status = "cancelada";
+    var cm = v.creditId && (db.credits || []).filter(function (m) { return m.id === v.creditId; })[0]; if (cm) cm.status = "cancelado";
+    var was = v.status; v.status = "rechazada"; v.rejectReason = why.trim(); buyLog(v, (was === "aprobada" ? "Cancelada" : "Rechazada") + (why ? ": " + why : ""));
+    auditLog(s.id, "Compras a clientes", (was === "aprobada" ? "Canceló" : "Rechazó") + " la solicitud " + ventaNum(v) + (why ? " · " + why : ""), tabAuditUser());
+    ui.modal = null; saveDB(); render(); toast("Solicitud " + (was === "aprobada" ? "cancelada" : "rechazada"));
+  },
+  buyVersion: function (el) {
+    var v = curVenta(), it = v && v.items.filter(function (i) { return i.id === el.dataset.id; })[0]; if (!it) return;
+    openModal({ type: "buyVersion", id: it.id, loading: true, prints: [] });
+    scryfallPrints(it.name).then(function (ps) { if (ui.modal && ui.modal.type === "buyVersion") { ui.modal.prints = ps; ui.modal.loading = false; renderModal(); } }).catch(function () { if (ui.modal) { ui.modal.loading = false; renderModal(); } });
+  },
+  buyVersionPick: function (el) {
+    var v = curVenta(), it = v && v.items.filter(function (i) { return i.id === ui.modal.id; })[0], p = (ui.modal.prints || []).filter(function (x) { return x.id === el.dataset.id; })[0]; if (!it || !p) return;
+    it.sfid = p.id; it.set = p.set; it.num = p.num; it.setName = p.setName; it.img = p.img; ui.modal = null;
+    ckFullGet([p.id]).then(function (m) {
+      it.base = buyBase(m[p.id], it.foil, v.cfg.fx);
+      if (it.kind === "sinprecio" && it.base != null) it.kind = it.base < v.cfg.bulkMax ? "bulk" : "normal";
+      buyRecalc(v, it); buySyncLinks(v); buyLog(v, "Cambió la versión de «" + it.name + "» a " + p.set + " #" + p.num); saveDB(); render();
+    });
+  },
+  posPay: function (el) { openModal({ type: "posPay", id: el.dataset.id }); },
+  posPayDo: function () {
+    var o = (db.pos || []).filter(function (x) { return x.id === ui.modal.id; })[0], s = curStore(); if (!o) return;
+    var amt = Number((document.getElementById("pp-amount") || {}).value), meth = (document.getElementById("pp-method") || {}).value || "Efectivo", ref = ((document.getElementById("pp-ref") || {}).value || "").trim();
+    var due = r2(o.amount - (o.payments || []).reduce(function (a, p) { return a + p.amount; }, 0));
+    if (!(amt > 0) || amt > due + 0.005) { toast("Escribe un monto entre $0.01 y " + money(due)); return; }
+    o.payments = (o.payments || []).concat([{ id: uid("pp"), amount: r2(amt), method: meth, ref: ref, date: Date.now(), by: tabAuditUser() }]);
+    if (amt >= due - 0.005) { o.status = "pagada"; o.paidAt = Date.now(); }
+    auditLog(s.id, "Compras a clientes", "Registró pago de " + money(amt) + " (" + meth + ") a la " + ocNum(o), tabAuditUser());
+    ui.modal = null; saveDB(); render(); toast(o.status === "pagada" ? ocNum(o) + " pagada" : "Pago parcial registrado");
+  },
+  buyCfgSave: function () {
+    var s = curStore(), b = buyCfg(s), g = function (id) { var el = document.getElementById(id); return el ? el.value : ""; };
+    CONDS.forEach(function (c) { b.pct[c] = Math.min(100, Math.max(0, Number(g("bc-p-" + c)) || 0)); b.wpct[c] = Math.min(100, Math.max(0, Number(g("bc-w-" + c)) || 0)); });
+    b.bulkMax = Math.max(0, Number(g("bc-bmax")) || 0); b.bulkPrice = Math.max(0, Number(g("bc-bprice")) || 0); b.bulkPer = Math.max(1, parseInt(g("bc-bper"), 10) || 1);
+    b.bonus = Math.max(0, Number(g("bc-bonus")) || 0); b.validDays = Math.max(1, parseInt(g("bc-days"), 10) || 7); b.roundDown = !!(document.getElementById("bc-round") || {}).checked;
+    auditLog(s.id, "Compras a clientes", "Actualizó la configuración de compra de cartas", tabAuditUser());
+    saveDB(); render(); toast("Configuración guardada");
+  }
+});
+Object.assign(CHANGE, {
+  buyF: function (el) { ui.buyF = el.value; render(); },
+  buyValid: function (el) { var v = curVenta(); if (!v) return; v.validUntil = el.value; buyLog(v, "Cambió la vigencia al " + fmtISO(el.value)); saveDB(); render(); },
+  buyItem: function (el) {
+    var v = curVenta(), it = v && v.items.filter(function (i) { return i.id === el.dataset.id; })[0]; if (!it) return;
+    var k = el.dataset.k;
+    if (k === "include") { it.include = el.checked; buyLog(v, (el.checked ? "Incluyó" : "Quitó") + " «" + it.name + "»"); }
+    else if (k === "qty") { it.qty = Math.max(0, parseInt(el.value, 10) || 0); if (!it.qty) it.include = false; }
+    else if (k === "cond") { it.cond = el.value; buyRecalc(v, it); buyLog(v, "Cambió el estado de «" + it.name + "» a " + it.cond); }
+    else if (k === "unit") { if (el.value === "") { it.manual = false; buyRecalc(v, it); } else { it.unit = r2(Math.max(0, Number(el.value) || 0)); it.manual = true; } buyLog(v, "Precio de «" + it.name + "»: " + (it.unit == null ? "sin precio" : money(it.unit))); }
+    else if (k === "foil") {
+      it.foil = el.checked;
+      ckFullGet([it.sfid]).then(function (m) { it.base = buyBase(m[it.sfid], it.foil, v.cfg.fx); buyRecalc(v, it); buySyncLinks(v); saveDB(); render(); });
+      buyLog(v, "Marcó «" + it.name + "» como " + (it.foil ? "foil" : "normal"));
+    }
+    buySyncLinks(v); saveDB(); render();
+  }
+});
+function admPOs(s) {
+  var F = ui.posF || "abiertas", list = posOf(s).sort(function (a, b) { return b.createdAt - a.createdAt; }).filter(function (o) { return F === "todas" || (F === "abiertas" ? (o.status === "pendiente_entrega" || o.status === "por_pagar") : o.status === F); });
+  var opt = function (v, l) { return '<option value="' + v + '"' + (F === v ? " selected" : "") + ">" + l + "</option>"; };
+  var porPagar = posOf(s).filter(function (o) { return o.status === "por_pagar"; }).reduce(function (a, o) { return a + o.amount - (o.payments || []).reduce(function (x, p) { return x + p.amount; }, 0); }, 0);
+  var rows = list.map(function (o) {
+    var v = (db.ventas || []).filter(function (x) { return x.id === o.ventaId; })[0], c = clientById(o.clientId), paid = (o.payments || []).reduce(function (a, p) { return a + p.amount; }, 0), st = OC_STATUS[o.status];
+    return '<tr><td class="mono"><strong>' + esc(ocNum(o)) + "</strong></td><td>" + esc(c ? c.name : "") + "</td><td>" + (v ? '<button type="button" class="linkbtn" data-act="buyOpen" data-id="' + v.id + '">' + esc(ventaNum(v)) + "</button>" : "—") + '</td><td class="muted" style="font-size:13px">' + fmtDay(o.createdAt) + "</td>" +
+      '<td class="num" style="text-align:right">' + money(o.amount) + '</td><td class="num" style="text-align:right;color:var(--ok)">' + money(paid) + '</td><td><span class="pill ' + st.cls + '">' + st.label + "</span></td>" +
+      "<td>" + (o.status === "por_pagar" ? '<button type="button" class="btn sm pri" data-act="posPay" data-id="' + o.id + '">Registrar pago</button>' : o.status === "pendiente_entrega" ? '<span class="muted" style="font-size:12px">Se paga al recibir las cartas</span>' : "") + "</td></tr>";
+  }).join("");
+  return '<div class="kpis"><div class="kpi"><span>Por pagar a clientes</span><strong style="color:var(--bad)">' + money(porPagar) + '</strong></div><div class="kpi"><span>Esperando cartas</span><strong>' + posOf(s).filter(function (o) { return o.status === "pendiente_entrega"; }).length + "</strong></div></div>" +
+    '<label class="field" for="pos-f" style="max-width:260px">Mostrar<select id="pos-f" data-change="posF">' + opt("abiertas", "Abiertas") + opt("pendiente_entrega", "Esperando cartas") + opt("por_pagar", "Por pagar") + opt("pagada", "Pagadas") + opt("cancelada", "Canceladas") + opt("todas", "Todas") + "</select></label>" +
+    '<div class="tbl-box"><table class="tbl" style="min-width:860px"><thead><tr><th>Orden</th><th>Cliente</th><th>Solicitud</th><th>Fecha</th><th style="text-align:right">Monto</th><th style="text-align:right">Pagado</th><th>Estado</th><th></th></tr></thead><tbody>' +
+    (rows || '<tr><td colspan="8" class="muted" style="text-align:center;padding:24px">No hay órdenes de compra con este filtro.</td></tr>') + "</tbody></table></div>";
+}
+Object.assign(CHANGE, { posF: function (el) { ui.posF = el.value; render(); } });
+function admBuyCfg(s) {
+  var b = buyCfg(s), fx = s.pricing.fx;
+  var pctRow = function (pre, tbl) { return CONDS.map(function (c) { return '<label class="field" for="bc-' + pre + "-" + c + '">' + c + '<input id="bc-' + pre + "-" + c + '" type="number" min="0" max="100" step="1" value="' + tbl[c] + '" class="mono"></label>'; }).join(""); };
+  var ex = 200, exN = buyUnit(Object.assign(buySnap(s), { bonus: 0 }), ex, "NM", false, "pago"), exW = buyUnit(Object.assign(buySnap(s), { bonus: 0 }), ex, "NM", true, "pago");
+  return '<form class="stack" data-submit="buyCfgSave" style="max-width:860px">' +
+    '<div class="card stack"><h2 style="font-size:18px">Cuánto pagas: % menos que Card Kingdom × tipo de cambio ($' + fx.toFixed(2) + ")</h2>" +
+    '<p class="muted" style="margin:0">Cartas normales</p><div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">' + pctRow("p", b.pct) + "</div>" +
+    '<p class="muted" style="margin:0">Cartas que están en la wishlist de tus clientes</p><div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">' + pctRow("w", b.wpct) + "</div>" +
+    '<p class="hint" style="margin:0">Ejemplo con una carta NM de ' + money(ex) + ": normal se ofrecen " + money(exN) + "; si está en wishlist, " + money(exW) + ".</p></div>" +
+    '<div class="card stack"><h2 style="font-size:18px">Bulk</h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">' +
+    '<label class="field" for="bc-bmax">Es bulk si vale menos de (MXN)<input id="bc-bmax" type="number" min="0" step="0.5" value="' + b.bulkMax + '" class="mono"></label>' +
+    '<label class="field" for="bc-bprice">Pagas (MXN)<input id="bc-bprice" type="number" min="0" step="0.5" value="' + b.bulkPrice + '" class="mono"></label>' +
+    '<label class="field" for="bc-bper">Por cada (cartas)<input id="bc-bper" type="number" min="1" step="1" value="' + b.bulkPer + '" class="mono"></label></div>' +
+    '<p class="hint" style="margin:0">Con ' + money(b.bulkPrice) + " por cada " + b.bulkPer + " cartas: 150 cartas de bulk = " + money(buyBulkTotal(buySnap(s), 150)) + ". El bulk siempre se paga en crédito; si una carta está en wishlist no cuenta como bulk.</p></div>" +
+    '<div class="card stack"><h2 style="font-size:18px">Otras reglas</h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">' +
+    '<label class="field" for="bc-bonus">Bono si elige crédito (%)<input id="bc-bonus" type="number" min="0" step="1" value="' + b.bonus + '" class="mono"></label>' +
+    '<label class="field" for="bc-days">Vigencia de la oferta (días)<input id="bc-days" type="number" min="1" step="1" value="' + b.validDays + '" class="mono"></label></div>' +
+    '<label class="row" style="gap:10px;min-height:40px" for="bc-round"><input id="bc-round" type="checkbox" style="width:20px;height:20px"' + (b.roundDown ? " checked" : "") + "> Redondear ofertas hacia abajo al peso</label>" +
+    '<p class="muted" style="margin:0;font-size:13px">El bono por crédito no aplica al bulk. Los cambios aplican a las solicitudes nuevas; las que ya se enviaron conservan sus precios.</p></div>' +
+    '<button type="submit" class="btn pri" style="align-self:flex-start">Guardar configuración</button></form>';
+}
+Object.assign(SUBMIT, { buyCfgSave: function () { ACT.buyCfgSave(); } });
+/* Modales del panel para compras (renderModal los pide con extraModal) */
+function extraModal(m) {
+  if (!(m.type === "buyReceive" || m.type === "buyReject" || m.type === "buyVersion" || m.type === "posPay" || m.type === "credit")) return "";
+      var inner = "";
+      if (m.type === "buyReceive") {
+        var v = curVenta(), T = buyTotals(v);
+        inner = '<div class="dlg plat sm"><button class="x" type="button" data-act="closeModal" aria-label="Cerrar">×</button><div class="stack"><h2 style="font-size:22px">Recibir cartas · ' + esc(ventaNum(v)) + "</h2>" +
+          '<div class="confirmbox"><strong>Revisa antes de confirmar</strong><ul><li>Cartas incluidas: <strong>' + T.n + "</strong>" + (T.bulkQ ? " (" + T.bulkQ + " de bulk)" : "") + "</li>" +
+          (T.cash ? "<li>Orden de compra por pagar: <strong>" + money(T.cash) + "</strong></li>" : "") + (T.credit ? "<li>Crédito que se libera: <strong>" + money(T.credit) + "</strong></li>" : "") + "</ul></div>" +
+          '<p class="muted" style="margin:0;font-size:13px">Antes de confirmar puedes ajustar estado, versión, foil, cantidad y precio de cada carta en la solicitud.</p>' +
+          '<div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeModal">Volver</button><button type="button" class="btn pri" data-act="buyReceiveDo">Sí, recibir y liberar</button></div></div></div>';
+      } else if (m.type === "buyReject") {
+        inner = '<div class="dlg plat sm"><button class="x" type="button" data-act="closeModal" aria-label="Cerrar">×</button><div class="stack"><h2 style="font-size:22px">' + (curVenta() && curVenta().status === "aprobada" ? "Cancelar solicitud" : "Rechazar solicitud") + "</h2>" +
+          '<label class="field" for="br-why">Motivo (lo ve el cliente)<input id="br-why" placeholder="Ej. no compramos esas cartas por ahora"></label>' +
+          '<div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeModal">Volver</button><button type="button" class="btn pri" data-act="buyRejectDo">Confirmar</button></div></div></div>';
+      } else if (m.type === "buyVersion") {
+        inner = '<div class="dlg plat"><button class="x" type="button" data-act="closeModal" aria-label="Cerrar">×</button><div class="stack"><h2 style="font-size:22px">Elige la versión correcta</h2>' +
+          (m.loading ? '<p class="muted">Buscando versiones…</p>' : '<div class="printgrid">' + (m.prints || []).map(function (p) { return '<button type="button" class="opt" data-act="buyVersionPick" data-id="' + esc(p.id) + '">' + cardImg(p) + '<strong style="font-size:13px">' + esc(p.set) + " · #" + esc(p.num) + '</strong><span class="muted" style="font-size:12px">' + esc(p.setName) + "</span></button>"; }).join("") + "</div>") + "</div></div>";
+      } else if (m.type === "posPay") {
+        var o = (db.pos || []).filter(function (x) { return x.id === m.id; })[0], due = r2(o.amount - (o.payments || []).reduce(function (a, p) { return a + p.amount; }, 0));
+        inner = '<div class="dlg plat sm"><button class="x" type="button" data-act="closeModal" aria-label="Cerrar">×</button><div class="stack"><h2 style="font-size:22px">Pagar ' + esc(ocNum(o)) + "</h2>" +
+          '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px"><label class="field" for="pp-amount">Monto (MXN)<input id="pp-amount" type="number" min="0" step="0.5" value="' + due + '" class="mono"></label>' +
+          '<label class="field" for="pp-method">Método<select id="pp-method"><option>Efectivo</option><option>Transferencia</option><option>Depósito</option></select></label></div>' +
+          '<label class="field" for="pp-ref">Referencia<input id="pp-ref" class="mono" placeholder="Opcional"></label>' +
+          '<div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeModal">Cancelar</button><button type="button" class="btn pri" data-act="posPayDo">Registrar pago</button></div></div></div>';
+      } else if (m.type === "credit") {
+        var c = clientById(m.id);
+        inner = '<div class="dlg plat sm"><button class="x" type="button" data-act="closeModal" aria-label="Cerrar">×</button><div class="stack"><h2 style="font-size:22px">' + (m.give ? "Dar crédito" : "Quitar crédito") + " · " + esc(c.name) + "</h2>" +
+          '<p class="muted" style="margin:0">Crédito disponible: <strong>' + money(creditAvail(c)) + "</strong></p>" +
+          '<label class="field" for="cr-amount">Monto (MXN)<input id="cr-amount" type="number" min="0" step="0.5" class="mono"></label>' +
+          '<label class="field" for="cr-note">Nota (obligatoria)<input id="cr-note" placeholder="Ej. cortesía por torneo"></label>' +
+          '<div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeModal">Cancelar</button><button type="button" class="btn pri" data-act="creditDo">Guardar</button></div></div></div>';
+      }
+      return inner;
+}
+
+/* ---------- Crédito: en el cliente, al cerrar cuentas, en abonos y en compras en línea ---------- */
+function creditSectionHTML(c) {
+  var mv = creditMovesOf(c).slice().sort(function (a, b) { return b.at - a.at; }), av = creditAvail(c), pe = creditPending(c);
+  var rows = mv.map(function (m) {
+    var plus = m.type === "abono";
+    return '<tr><td class="num" style="white-space:nowrap">' + fmtDay(m.at) + "</td><td>" + (plus ? "Abono" : "Uso") + " · " + esc(CREDIT_ORIGIN[m.origin] || m.origin) + (m.ref ? " " + esc(m.ref) : "") + (m.note ? '<br><span class="muted" style="font-size:12px">' + esc(m.note) + "</span>" : "") + "</td>" +
+      '<td class="muted" style="font-size:12px">' + esc(m.by || "") + "</td><td>" + (m.status === "pendiente" ? '<span class="pill warn">Pendiente de liberar</span>' : '<span class="pill ok">Aplicado</span>') + "</td>" +
+      '<td class="num" style="text-align:right;font-weight:600;color:' + (plus ? "var(--ok)" : "var(--bad)") + '">' + (plus ? "+" : "−") + money(m.amount) + "</td></tr>";
+  }).join("");
+  return '<section class="card stack"><div class="row" style="justify-content:space-between;gap:10px"><div><h2 style="font-size:18px">Crédito en tienda</h2><p class="muted" style="margin:0">Disponible: <strong style="color:var(--ok)">' + money(av) + "</strong>" + (pe ? " · Pendiente de liberar: <strong>" + money(pe) + "</strong>" : "") + "</p></div>" +
+    '<div class="row" style="gap:8px"><button type="button" class="btn sm" data-act="creditGive" data-id="' + c.id + '">Dar crédito</button><button type="button" class="btn sm" data-act="creditTake" data-id="' + c.id + '"' + (av > 0 ? "" : " disabled") + ">Quitar crédito</button></div></div>" +
+    (rows ? '<div class="tbl-box"><table class="tbl" style="min-width:640px"><thead><tr><th>Fecha</th><th>Movimiento</th><th>Por</th><th>Estado</th><th style="text-align:right">Monto</th></tr></thead><tbody>' + rows + "</tbody></table></div>" : '<p class="muted" style="margin:0">Sin movimientos de crédito.</p>') +
+    '<p class="muted" style="margin:0;font-size:12px">Para usar el crédito en un saldo pendiente, registra un abono con el método «Crédito en tienda».</p></section>';
+}
+Object.assign(ACT, {
+  creditGive: function (el) { openModal({ type: "credit", id: el.dataset.id, give: true }); },
+  creditTake: function (el) { openModal({ type: "credit", id: el.dataset.id, give: false }); },
+  creditDo: function () {
+    var m = ui.modal, c = clientById(m.id), s = curStore(); if (!c) return;
+    var amt = r2(Number((document.getElementById("cr-amount") || {}).value) || 0), note = ((document.getElementById("cr-note") || {}).value || "").trim();
+    if (!(amt > 0)) { toast("Escribe un monto"); return; }
+    if (!note) { toast("Escribe una nota"); return; }
+    if (!m.give && amt > creditAvail(c) + 0.005) { toast("Solo tiene " + money(creditAvail(c)) + " de crédito"); return; }
+    creditAdd(c, m.give ? "abono" : "cargo", amt, "ajuste", "", note);
+    auditLog(s.id, "Clientes", (m.give ? "Dio " : "Quitó ") + money(amt) + " de crédito a «" + c.name + "»: " + note, tabAuditUser());
+    ui.modal = null; saveDB(); render(); toast(m.give ? "Crédito agregado" : "Crédito descontado");
+  }
+});
+(function () {
+  var prevD = admClientDetail;
+  admClientDetail = function (s, c) { var h = prevD(s, c); var k = '<section class="stack" style="gap:8px"><h2 style="font-size:18px">Estado de cuenta</h2>'; return h.indexOf(k) >= 0 ? h.replace(k, creditSectionHTML(c) + k) : h + creditSectionHTML(c); };
+  var prevT = admTabDetail;
+  admTabDetail = function (s, t) {
+    var h = prevT(s, t), c = t.clientId && clientById(t.clientId), av = c ? creditAvail(c) : 0;
+    if (!(av > 0)) return h;
+    return h.replace('<div class="split">', '<p class="pill ok" style="white-space:normal;border-radius:8px;align-self:flex-start;padding:8px 12px">' + esc(c.name) + " tiene " + money(av) + " de crédito en tienda. Puedes usarlo al cerrar la cuenta (método «Crédito en tienda»).</p>" + '<div class="split">');
+  };
+  var prevK = clKpisHTML;
+  clKpisHTML = function (s) {
+    var h = prevK(s), av = 0, pe = 0;
+    clientsOf(s).forEach(function (c) { av += creditAvail(c); pe += creditPending(c); });
+    var tiles = '<div class="kpi"><span>Crédito disponible</span><strong>' + money(av) + '</strong><span class="muted" style="font-size:12px">de tus clientes · hoy</span></div><div class="kpi"><span>Crédito por liberar</span><strong>' + money(pe) + '</strong><span class="muted" style="font-size:12px">esperando cartas</span></div>';
+    return h.replace('</div><p class="muted" style="margin:-6px 0 0', tiles + '</div><p class="muted" style="margin:-6px 0 0');
+  };
+  /* Cerrar cuenta con crédito */
+  var prevNext = SUBMIT.tabCloseNext;
+  SUBMIT.tabCloseNext = function (f) {
+    var meth = (document.getElementById("tc-method") || {}).value, amt = Number((document.getElementById("tc-amount") || {}).value) || 0;
+    if (meth === "Crédito en tienda" && amt > 0) {
+      var t = tabOf(ui.modal.id), cid = t.clientId || (document.getElementById("tc-client") || {}).value, c = cid && cid !== "__new__" && clientById(cid);
+      if (!c) { toast("Para pagar con crédito elige al cliente"); return; }
+      if (amt > creditAvail(c) + 0.005) { toast(c.name + " solo tiene " + money(creditAvail(c)) + " de crédito"); return; }
+    }
+    return prevNext.apply(this, arguments);
+  };
+  var prevDo = ACT.tabCloseDo;
+  ACT.tabCloseDo = function () {
+    var m = ui.modal, t = m && tabOf(m.id), d = m && m.data, total = t ? computeTab(t).total : 0, meth = d && d.method, amt = d ? Number(d.amount) || 0 : 0;
+    var r = prevDo.apply(this, arguments);
+    if (t && meth === "Crédito en tienda" && amt > 0 && t.clientId) {
+      var c = clientById(t.clientId), paid = r2(Math.min(amt, total));
+      if (c && paid > 0) { creditAdd(c, "cargo", paid, "cuenta", "", "Cuenta cerrada el " + fmtDay(Date.now())); saveDB(); }
+    }
+    return r;
+  };
+  /* Abono a saldo con crédito */
+  var prevPN = SUBMIT.clientPayNext;
+  SUBMIT.clientPayNext = function (f) {
+    var meth = (document.getElementById("cp-method") || {}).value, amt = Number((document.getElementById("cp-amount") || {}).value) || 0, c = clientById(ui.modal.id);
+    if (meth === "Crédito en tienda" && c && amt > creditAvail(c) + 0.005) { toast(c.name + " solo tiene " + money(creditAvail(c)) + " de crédito"); return; }
+    return prevPN.apply(this, arguments);
+  };
+  var prevPD = ACT.clientPayDo;
+  ACT.clientPayDo = function () {
+    var m = ui.modal, d = m && m.data, c = m && clientById(m.id);
+    var r = prevPD.apply(this, arguments);
+    if (c && d && d.method === "Crédito en tienda" && d.amount > 0) { creditAdd(c, "cargo", d.amount, "deuda", "", "Abono a saldo pendiente"); saveDB(); }
+    return r;
+  };
+  /* Tienda: usar crédito al hacer el pedido */
+  var prevCart = storeCart;
+  storeCart = function (s) {
+    var h = prevCart(s), mc = db.buyer ? myCredit() : null; if (!mc || !(mc.avail > 0)) return h;
+    var tot = cartLines(s).reduce(function (a, x) { return a + (x.unit || 0) * x.line.qty; }, 0), use = ui.useCredit ? r2(Math.min(mc.avail, tot)) : 0;
+    var box = '<label class="row" style="gap:10px;min-height:40px" for="use-credit"><input id="use-credit" type="checkbox" data-change="useCredit" style="width:20px;height:20px;accent-color:var(--s-accent)"' + (ui.useCredit ? " checked" : "") + "> Usar mi crédito en tienda (disponible " + money(mc.avail) + ")</label>" +
+      (use ? '<p style="margin:0">Se descuentan <strong>' + money(use) + "</strong> de crédito · quedan por pagar <strong>" + money(r2(tot - use)) + "</strong>" + (tot - use < 0.005 ? " (tu pedido queda pagado)" : "") + "</p>" : "");
+    var k = '<div class="row" style="justify-content:space-between"><div><span class="muted">Total</span>';
+    return h.indexOf(k) >= 0 ? h.replace(k, box + k) : h;
+  };
+  var prevConf = storeConfirm;
+  storeConfirm = function (s) {
+    var h = prevConf(s), o = db.orders.filter(function (x) { return x.id === ui.lastOrder; })[0];
+    if (!o || !(o.creditUsed > 0)) return h;
+    return h.replace('<div class="panel stack"><h3 style="font-size:18px">Cómo pagar</h3>', '<div class="panel"><strong>Crédito en tienda: ' + money(o.creditUsed) + '</strong> <span class="muted">se descuenta de tu pedido cuando la tienda lo confirme. Te queda por pagar ' + money(r2(o.total - o.creditUsed)) + ".</span></div>" + '<div class="panel stack"><h3 style="font-size:18px">Cómo pagar</h3>');
+  };
+})();
+Object.assign(CHANGE, { useCredit: function (el) { ui.useCredit = el.checked; render(); } });
+/* El panel aplica (y regresa) el crédito de los pedidos en línea. */
+(function () {
+  var prevR = render;
+  render = function () {
+    if (typeof APP_MODE !== "undefined" && APP_MODE === "panel" && db.orders && db.stores.length) { try { if (creditSyncOrders()) saveDB(); } catch (e) {} }
+    return prevR.apply(this, arguments);
+  };
+})();
+
 window.addEventListener("hashchange", function () { applyRoute(); });
 db.stores.forEach(function (x) { if (x.pricing.fxMode !== "manual") { x.pricing.fxMode = "manual"; x.pricing.fx = x.pricing.manualFx || x.pricing.fx; } });
 if (!db.blankDone) { (function () { var s = db.stores.filter(function (x) { return x.id === "store-dr"; })[0] || db.stores[0]; db.stores = [s]; ["inventory","products","orders","events","payments","internal","promos","clients","tabs","clientPays","audit"].forEach(function (k) { db[k] = []; }); db.carts = {}; db.wishlists = {}; db.wishMeta = {}; db.buyerInfo = {}; db.buyer = null; db.wishSeeded = true; s.categories = []; s.nextOrder = 1001; s.theme.slides = []; s.adminEmail = ""; s.info.address = ""; s.info.whatsapp = ""; s.info.hours = ""; db.blankDone = true; })(); }
@@ -4041,8 +4796,8 @@ var FB_CONFIG = {
   messagingSenderId: "412449412802",
   appId: "1:412449412802:web:b8c5d83ec404481585cd5b"
 };
-var FB_BUILD = 20261029, FB_SLUG = "neko-games", FB_SDK = "https://www.gstatic.com/firebasejs/10.14.1/", FB_CART = "nekogames-carrito";
-var FB = { user: null, admin: false, admins: [], pubOK: false, privOK: false, ordOK: false, meOK: false, lastPub: null, lastPriv: null, lastOrd: {}, lastMe: null, cliDocs: {}, then: null, timer: null, meCreated: null };
+var FB_BUILD = 20261103, CK_FULL_BASE = "https://raw.githubusercontent.com/gacostatche-coder/nekogames/precios-ck/ck/", FB_SLUG = "neko-games", FB_SDK = "https://www.gstatic.com/firebasejs/10.14.1/", FB_CART = "nekogames-carrito";
+var FB = { lastVen: {}, lastCred: {}, venOK: false, user: null, admin: false, admins: [], pubOK: false, privOK: false, ordOK: false, meOK: false, lastPub: null, lastPriv: null, lastOrd: {}, lastMe: null, cliDocs: {}, then: null, timer: null, meCreated: null };
 var fdb = null, fauth = null;
 var G_ICON = '<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>';
 
@@ -4064,7 +4819,7 @@ var G_ICON = '<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"
 function fbStore() { return db.stores[0]; }
 function fbRefs() {
   var t = fdb.collection("tiendas").doc(FB_SLUG);
-  return { pub: t, priv: t.collection("privado").doc("datos"), acc: t.collection("acceso").doc("admins"), cnt: t.collection("contador").doc("pedidos"), ped: t.collection("pedidos"), cli: t.collection("clientes"), img: t.collection("imagenes"), parts: t.collection("partes"), main: t.collection("datos").doc("tienda"), blk: t.collection("bloques") };
+  return { pub: t, priv: t.collection("privado").doc("datos"), acc: t.collection("acceso").doc("admins"), cnt: t.collection("contador").doc("pedidos"), cntV: t.collection("contador").doc("ventas"), ven: t.collection("ventas"), cred: t.collection("creditos"), ped: t.collection("pedidos"), cli: t.collection("clientes"), img: t.collection("imagenes"), parts: t.collection("partes"), main: t.collection("datos").doc("tienda"), blk: t.collection("bloques") };
 }
 function fbErr(e) {
   try { console.warn("[firebase]", e && (e.code || e.message) || e); } catch (x) {}
@@ -4080,13 +4835,14 @@ function fbPubData() {
   var cat = {}; Object.keys(used).forEach(function (id) { if (db.catalog[id]) cat[id] = db.catalog[id]; });
   return { store: s, inventory: db.inventory || [], products: db.products || [], events: db.events || [], catalog: cat };
 }
-function fbPrivData() { return { clients: db.clients || [], tabs: db.tabs || [], clientPays: db.clientPays || [], audit: (db.audit || []).slice(0, 500), internal: db.internal || [], promos: db.promos || [] }; }
+function fbPrivData() { return { credits: db.credits || [], pos: db.pos || [], posSeq: db.posSeq || 0, clients: db.clients || [], tabs: db.tabs || [], clientPays: db.clientPays || [], audit: (db.audit || []).slice(0, 500), internal: db.internal || [], promos: db.promos || [] }; }
 function fbMeData() {
   var b = db.buyer || {}, s = fbStore(), k = FB.user.uid;
   return { name: b.name || "", email: (FB.user.email || "").toLowerCase(), phone: b.phone || "", photo: b.avatar || "", wishlist: ((db.wishlists[k] || {})[s.id]) || [], wishMeta: (((db.wishMeta || {})[k] || {})[s.id]) || {}, createdAt: FB.meCreated || Date.now() };
 }
 function fbApplyPub(d) {
   if (!d || !d.store) return;
+  if (!FB.admin) db.wanted = d.wanted || {};
   FB.serverInv = (d.inventory || []).length;
   db.stores = [d.store]; db.inventory = d.inventory || []; db.products = d.products || []; db.events = d.events || [];
   Object.keys(d.catalog || {}).forEach(function (id) { db.catalog[id] = d.catalog[id]; });
@@ -4115,7 +4871,16 @@ function fbUnpack(json, cb) {
 /* ---- Inventario y catálogo repartidos en varios documentos: cada documento de Firestore admite 1 MB ---- */
 FB.parts = {}; FB.main = null; FB.lastPart = {}; FB.partN = 1; FB.lastSig = null;
 function fbBucket(id, n) { var h = 0; id = String(id); for (var i = 0; i < id.length; i++) h = (Math.imul(h, 31) + id.charCodeAt(i)) >>> 0; return h % n; }
-function fbMainData() { return { store: fbStore(), products: db.products || [], events: db.events || [] }; }
+/* Cartas que buscan los clientes (por nombre): la tienda la usa para ofrecer mejor precio en «Vende tus cartas». */
+function fbWanted() {
+  var s = fbStore(), out = {};
+  Object.keys(db.wishlists || {}).forEach(function (k) {
+    var seen = {};
+    ((db.wishlists[k] || {})[s.id] || []).forEach(function (id) { if (String(id).indexOf("p:") === 0) return; var p = db.catalog[id]; if (!p) return; var n = norm(p.name); if (seen[n]) return; seen[n] = 1; out[n] = (out[n] || 0) + 1; });
+  });
+  return out;
+}
+function fbMainData() { return { store: fbStore(), products: db.products || [], events: db.events || [], wanted: fbWanted() }; }
 function fbSplit() {
   var d = fbPubData(), n = Math.max(1, FB.partN || 1), out;
   var total = JSON.stringify(d.inventory).length + JSON.stringify(d.catalog).length;
@@ -4260,6 +5025,17 @@ function fbFlush() {
       });
       Object.keys(FB.lastOrd).forEach(function (id) { if (!seen[id]) { delete FB.lastOrd[id]; r.ped.doc(id).delete().catch(fbErr); } });
     }
+    if (FB.venOK) {
+      (db.ventas || []).forEach(function (v) { var j = JSON.stringify(v); if (FB.lastVen[v.id] !== j) { FB.lastVen[v.id] = j; r.ven.doc(v.id).set({ uid: v.uid || "", json: j, at: now }).catch(fbErr); } });
+    }
+    /* Resumen de crédito que cada cliente ve en la tienda (solo lo escribe el panel). */
+    clientsOf(fbStore()).forEach(function (c) {
+      if (!c.buyerId || !FB.privOK) return;
+      var mv = creditMovesOf(c);
+      if (!mv.length && !FB.lastCred[c.buyerId]) return;
+      var cj = JSON.stringify({ avail: creditAvail(c), pending: creditPending(c), moves: mv.slice(-30).map(function (m) { return { at: m.at, type: m.type, amount: m.amount, status: m.status, origin: m.origin, ref: m.ref, note: m.note }; }) });
+      if (FB.lastCred[c.buyerId] !== cj) { FB.lastCred[c.buyerId] = cj; r.cred.doc(c.buyerId).set({ uid: c.buyerId, json: cj, at: now }).catch(fbErr); }
+    });
   } else if (FB.meOK) {
     var mj = JSON.stringify(fbMeData());
     if (mj !== FB.lastMe) { FB.lastMe = mj; r.cli.doc(FB.user.uid).set({ uid: FB.user.uid, email: (FB.user.email || "").toLowerCase(), json: mj, at: now }).catch(fbErr); }
@@ -4301,9 +5077,15 @@ function fbAdminOK() {
     if (!snap.exists) { FB.privOK = true; fbMergeAllClients(); fbFlush(); return; }
     var j = snap.data().json; if (FB.privOK && j === FB.lastPriv) return;
     FB.lastPriv = j; var d = JSON.parse(j);
+    db.credits = d.credits || []; db.pos = d.pos || []; db.posSeq = d.posSeq || 0;
     db.clients = d.clients || []; db.tabs = d.tabs || []; db.clientPays = d.clientPays || []; db.audit = d.audit || []; db.internal = d.internal || []; db.promos = d.promos || [];
     FB.privOK = true; if (fbMergeAllClients()) saveDB(); render();
   }, fbErr);
+  r.ven.onSnapshot(function (qs) {
+    var list = []; qs.forEach(function (d) { var x = d.data(); FB.lastVen[d.id] = x.json; list.push(JSON.parse(x.json)); });
+    db.ventas = list; FB.venOK = true; render();
+  }, fbErr);
+  r.cred.get().then(function (qs) { qs.forEach(function (d) { FB.lastCred[d.id] = d.data().json; }); }, function () {});
   r.ped.onSnapshot(function (qs) {
     var list = []; qs.forEach(function (d) { var x = d.data(); FB.lastOrd[d.id] = x.json; list.push(JSON.parse(x.json)); });
     db.orders = list; FB.ordOK = true; fbApplyStock(); render();
@@ -4433,6 +5215,11 @@ function fbOnCustomer(u) {
     var list = []; qs.forEach(function (d) { list.push(JSON.parse(d.data().json)); });
     db.orders = list; render();
   }, fbErr);
+  r.ven.where("uid", "==", u.uid).onSnapshot(function (qs) {
+    var list = []; qs.forEach(function (d) { list.push(JSON.parse(d.data().json)); });
+    db.ventas = list; render();
+  }, fbErr);
+  r.cred.doc(u.uid).onSnapshot(function (snap) { db.myCredit = snap.exists ? JSON.parse(snap.data().json) : { avail: 0, pending: 0, moves: [] }; render(); }, function () {});
 }
 var _fbPlaceOrder = placeOrder;
 placeOrder = function (note) {
@@ -4457,6 +5244,7 @@ placeOrder = function (note) {
   }).then(function (n) {
     var o = { id: uid("ord"), storeId: s.id, number: n, buyer: { id: b.id, name: b.name, email: b.email, phone: b.phone || "" }, items: items, status: "pendiente", createdAt: Date.now(), note: note || "" };
     o.total = items.reduce(function (a, i) { return a + i.unit * i.qty; }, 0);
+    if (ui.useCredit && db.myCredit && db.myCredit.avail > 0) { o.creditUsed = Math.round(Math.min(db.myCredit.avail, o.total) * 100) / 100; ui.useCredit = false; }
     return r.ped.doc(o.id).set({ uid: FB.user.uid, json: JSON.stringify(o), at: Date.now() }).then(function () { return o; });
   }).then(function (o) {
     if (!db.orders.some(function (x) { return x.id === o.id; })) db.orders.push(o);
@@ -4494,6 +5282,19 @@ function fbBoot() {
       if (u) fbOnCustomer(u);
       else { FB.user = null; FB.meOK = false; db.buyer = null; db.orders = []; render(); }
     });
+  });
+}
+
+/* La tienda envía una solicitud de venta con folio consecutivo (V-0001…). */
+function fbSubmitVenta(v) {
+  var r = fbRefs();
+  if (!FB.user) return Promise.reject(new Error("sin sesión"));
+  v.uid = FB.user.uid;
+  return fdb.runTransaction(function (tx) {
+    return tx.get(r.cntV).then(function (c) { var n = c.exists ? Number(c.data().n) + 1 : 1; if (c.exists) tx.update(r.cntV, { n: n }); else tx.set(r.cntV, { n: n }); return n; });
+  }).then(function (n) {
+    v.number = n;
+    return r.ven.doc(v.id).set({ uid: v.uid, json: JSON.stringify(v), at: Date.now() }).then(function () { return v; });
   });
 }
 
