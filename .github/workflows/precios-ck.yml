@@ -78,8 +78,29 @@ jobs:
               "revisadas": sorted(ids),
           }
           json.dump(out, open("ck-precios.json", "w"), separators=(",", ":"))
+          # Lista completa (todas las cartas de Card Kingdom) para «Vende tus cartas», en 16 archivos
+          os.makedirs("/tmp/ckfull/ck", exist_ok=True)
+          partes = {}
+          for s_id, v in ck.items():
+              partes.setdefault(s_id[0], {})[s_id] = v
+          for k, v in partes.items():
+              json.dump(v, open("/tmp/ckfull/ck/%s.json" % k, "w"), separators=(",", ":"))
+          json.dump({"at": out["at"], "cartas": len(ck)}, open("/tmp/ckfull/ck/info.json", "w"))
+          print("lista completa:", len(ck), "cartas en", len(partes), "archivos")
           PY
           rm ck_raw.json
+
+      - name: Publicar la lista completa (rama precios-ck, sin historial)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd /tmp/ckfull
+          git init -q -b precios-ck
+          git config user.name "precios-bot"
+          git config user.email "precios-bot@users.noreply.github.com"
+          git add ck
+          git commit -q -m "Lista completa Card Kingdom $(date -u +%F)"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" precios-ck
 
       - name: Guardar en el sitio
         run: |
