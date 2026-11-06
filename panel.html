@@ -3864,6 +3864,9 @@ function ckSfid(p) { return p.scryfallId || (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{
 function ckApply() {
   if (!CK.data) return false;
   var map = CK.data.p || {}, seen = CK.seen, s = curStore(), used = {}, ch = false;
+  /* Si otra pestaña ya aplicó una lista más nueva, esta no la pisa: vuelve a descargar la lista. */
+  var mine = String(CK.at || ""), done = String((s.pricing && s.pricing.ckAt) || "");
+  if (done && mine < done) { if (!CK.retry) { CK.retry = 1; CK.state = "idle"; setTimeout(ckLoad, 1500); } return false; }
   (db.inventory || []).forEach(function (i) { if (i.storeId === s.id) used[i.printId] = 1; });
   Object.keys(used).forEach(function (id) {
     var p = db.catalog[id]; if (!p) return;
@@ -3873,12 +3876,13 @@ function ckApply() {
     var cur = p.prices.cardkingdom || {};
     if (cur.normal !== nv.normal || cur.foil !== nv.foil) { p.prices.cardkingdom = nv; ch = true; }
   });
+  if (ch && mine && s.pricing && s.pricing.ckAt !== mine) s.pricing.ckAt = mine;
   return ch;
 }
 function ckLoad() {
   if (CK.state !== "idle") return;
   CK.state = "loading";
-  fetch("ck-precios.json", { cache: "no-cache" }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+  fetch("ck-precios.json?t=" + Date.now(), { cache: "no-store" }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
     .then(function (d) {
       CK.data = d; CK.at = d.at || null; CK.seen = {}; (d.revisadas || []).forEach(function (x) { CK.seen[x] = 1; });
       CK.state = "ok"; ckApply(); render();
@@ -4796,7 +4800,7 @@ var FB_CONFIG = {
   messagingSenderId: "412449412802",
   appId: "1:412449412802:web:b8c5d83ec404481585cd5b"
 };
-var FB_BUILD = 20261103, CK_FULL_BASE = "https://raw.githubusercontent.com/gacostatche-coder/nekogames/precios-ck/ck/", FB_SLUG = "neko-games", FB_SDK = "https://www.gstatic.com/firebasejs/10.14.1/", FB_CART = "nekogames-carrito";
+var FB_BUILD = 20261106, CK_FULL_BASE = "https://raw.githubusercontent.com/gacostatche-coder/nekogames/precios-ck/ck/", FB_SLUG = "neko-games", FB_SDK = "https://www.gstatic.com/firebasejs/10.14.1/", FB_CART = "nekogames-carrito";
 var FB = { lastVen: {}, lastCred: {}, venOK: false, user: null, admin: false, admins: [], pubOK: false, privOK: false, ordOK: false, meOK: false, lastPub: null, lastPriv: null, lastOrd: {}, lastMe: null, cliDocs: {}, then: null, timer: null, meCreated: null };
 var fdb = null, fauth = null;
 var G_ICON = '<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>';
@@ -4947,9 +4951,17 @@ function fbAssembleLegacy(admin) {
 function fbAssemble(admin) {
   if (!FB.main && FB.needLegacy) return fbAssembleLegacy(admin);
   var m = FB.main; if (!m || !FB.partsLoaded) return;
-  var list = m.parts || null;
-  if (list && !list.every(function (p) { return FB.parts[p.id] && FB.parts[p.id].h === p.h; })) return;
-  var sig = m.json + "|" + (list ? list.map(function (p) { return p.h; }).join(",") : "old");
+  var list = m.parts || null, fixMain = false;
+  if (list && !list.every(function (p) { return FB.parts[p.id] && FB.parts[p.id].h === p.h; })) {
+    /* Las partes no coinciden con el documento principal (por ejemplo, dos pestañas guardando al mismo tiempo).
+       Se espera un momento por si es un guardado en curso; si sigue igual, se arma con lo que hay y el panel lo corrige. */
+    if (!FB.mmSince) FB.mmSince = Date.now();
+    clearTimeout(FB.mmTimer);
+    if (Date.now() - FB.mmSince < 2000) { FB.mmTimer = setTimeout(function () { fbAssemble(admin); }, 2100); return; }
+    list = list.filter(function (p) { return FB.parts[p.id]; });
+    fixMain = true;
+  } else FB.mmSince = 0;
+  var sig = m.json + "|" + (list ? list.map(function (p) { return FB.parts[p.id] ? FB.parts[p.id].h : p.h; }).join(",") : "old");
   if ((FB.pubOK || !admin) && sig === FB.lastSig) return;
   FB.lastSig = sig; FB.lastPub = m.json; if (list) FB.partN = Math.max(FB.partN || 1, list.length);
   var seq = ++FB.pubSeq;
@@ -4960,7 +4972,8 @@ function fbAssemble(admin) {
       list.forEach(function (p) { var x = JSON.parse(FB.parts[p.id].json); d.inventory = d.inventory.concat(x.inventory || []); Object.keys(x.catalog || {}).forEach(function (k) { d.catalog[k] = x.catalog[k]; }); });
     }
     fbApplyPub(d);
-    if (admin) { FB.pubOK = true; fbApplyStock(); if (!list) setTimeout(fbFlush, 600); /* formato anterior: se pasa al nuevo */ }
+    if (admin) { FB.pubOK = true; fbApplyStock(); if (!list || fixMain) { FB.lastSig = null; setTimeout(fbFlush, 600); } }
+    FB.mmSince = 0;
     render();
   });
 }
@@ -4999,6 +5012,16 @@ function fbFlush() {
         });
         var changed = parts.filter(function (x) { return FB.lastPart[x.id] !== x.h; });
         Promise.all(ups).then(function () {
+          var mainDoc = { json: pj, parts: parts.map(function (x) { return { id: x.id, h: x.h }; }), at: now, v: FB_BUILD, minClient: FB_BUILD };
+          var allSize = changed.reduce(function (a, x) { return a + x.json.length; }, pj.length);
+          if (allSize < 8000000) {
+            /* Todo en un solo guardado: las partes y el documento principal cambian juntos o no cambian. */
+            var one = fdb.batch(); changed.forEach(function (x) { one.set(r.blk.doc(x.id), { json: x.json, h: x.h, at: now }); }); one.set(r.main, mainDoc);
+            return one.commit().then(function () {
+              changed.forEach(function (x) { FB.lastPart[x.id] = x.h; }); FB.serverInv = invNow;
+              prevRefs.forEach(function (id) { if (pk.refs.indexOf(id) < 0) { delete known[id]; r.img.doc(id).delete().catch(function () {}); } });
+            });
+          }
           var groups = [], cur = [], size = 0;
           changed.forEach(function (x) { if (cur.length && size + x.json.length > 6000000) { groups.push(cur); cur = []; size = 0; } cur.push(x); size += x.json.length; });
           if (cur.length) groups.push(cur);
