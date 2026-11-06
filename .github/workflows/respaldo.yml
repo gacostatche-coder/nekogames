@@ -1,0 +1,65 @@
+name: Respaldo de la tienda
+
+on:
+  schedule:
+    - cron: "41 9 * * *"   # todos los días, 4:41 am hora de Cancún
+  workflow_dispatch:         # botón para correrlo a mano
+
+permissions:
+  contents: write
+
+env:
+  PROYECTO: plataforma-tcg-821c5
+  TIENDA: neko-games
+
+jobs:
+  respaldo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copiar el inventario y la tienda desde Firebase
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request, datetime
+          base = "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/tiendas/%s" % (os.environ["PROYECTO"], os.environ["TIENDA"])
+          def get(path):
+              try:
+                  return json.load(urllib.request.urlopen(base + path, timeout=60))
+              except Exception as e:
+                  return {"error": str(e)}
+          def col(name):
+              out, tok = [], ""
+              while True:
+                  r = get("/%s?pageSize=300%s" % (name, "&pageToken=" + tok if tok else ""))
+                  out += r.get("documents", [])
+                  tok = r.get("nextPageToken")
+                  if not tok:
+                      return out
+          data = {
+              "fecha": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "principal_anterior": get(""),
+              "datos": col("datos"),
+              "partes": col("partes"),
+              "bloques": col("bloques"),
+          }
+          json.dump(data, open("respaldo-tienda.json", "w"), separators=(",", ":"))
+          def cartas(doc):
+              try:
+                  return len(json.loads(doc["fields"]["json"]["stringValue"]).get("inventory", []))
+              except Exception:
+                  return 0
+          print("principal: registros de cartas =", cartas(data["principal_anterior"]))
+          for grupo in ("partes", "bloques"):
+              for d in data[grupo]:
+                  print(grupo, d["name"].split("/")[-1], "· actualizado", d.get("updateTime"), "· registros de cartas =", cartas(d))
+          PY
+
+      - name: Guardar el respaldo
+        run: |
+          git config user.name "respaldo-bot"
+          git config user.email "respaldo-bot@users.noreply.github.com"
+          git add respaldo-tienda.json
+          git diff --cached --quiet || git commit -m "Respaldo de la tienda $(date -u +%F)"
+          git pull --rebase -q || true
+          git push
