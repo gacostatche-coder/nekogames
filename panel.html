@@ -849,13 +849,19 @@ function basePrice(store, p, finish) {
   if (v == null) v = p.prices[alt] && p.prices[alt][finish];
   return v == null ? null : Number(v);
 }
+function minRarVal(pr, r, c) {
+  if (pr.minByRar && pr.minByRar[r]) return pr.minByRar[r][c];
+  var v = (pr.minByCond || {})[c]; if (v == null && Number(pr.minPrice) > 0) v = pr.minPrice; return v;
+}
 function unitPrice(store, item) {
   if (item.fixed && item.price != null && item.price !== "") return Number(item.price);
   var p = printOf(item.printId), b = basePrice(store, p, item.finish);
   if (b == null) return null;
   var f = (store.pricing.cond[item.cond] || 100) / 100;
   var v = Math.round(b * store.pricing.fx * (1 + store.pricing.margin / 100) * f * 100) / 100;
-  var mbc = store.pricing.minByCond, mn = mbc ? Number(mbc[item.cond]) || 0 : Number(store.pricing.minPrice) || 0;
+  var mbr = store.pricing.minByRar, mbc = store.pricing.minByCond, mn;
+  if (mbr) { var rt = mbr[rarKey(p && p.rarity)] || {}; mn = Number(rt[item.cond]) || 0; }
+  else mn = mbc ? Number(mbc[item.cond]) || 0 : Number(store.pricing.minPrice) || 0;
   return mn > 0 && v < mn ? mn : v;
 }
 function cartOf(storeId) { if (!db.carts[storeId]) db.carts[storeId] = []; return db.carts[storeId]; }
@@ -1908,9 +1914,11 @@ function admPricing(s) {
     '<p class="muted" style="margin:0;font-size:13px">Este valor convierte a pesos los precios de referencia en dólares.</p></div>' +
     '<div class="card stack"><h2 style="font-size:18px">Precio por condición (% del NM)</h2><div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">' +
     CONDS.map(function (c) { return '<label class="field" for="pr-' + c + '">' + c + '<input id="pr-' + c + '" type="number" min="1" max="100" value="' + pr.cond[c] + '" class="mono"></label>'; }).join("") + "</div></div>" +
-    '<div class="card stack"><h2 style="font-size:18px">Precio mínimo por condición (MXN)</h2><div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">' +
-    CONDS.map(function (c) { var v = (pr.minByCond || {})[c]; if (v == null && Number(pr.minPrice) > 0) v = pr.minPrice; return '<label class="field" for="pr-min-' + c + '">' + c + '<input id="pr-min-' + c + '" type="number" min="0" step="0.5" value="' + (Number(v) > 0 ? v : "") + '" placeholder="Sin mínimo" class="mono"></label>'; }).join("") + "</div>" +
-    '<p class="muted" style="margin:0;font-size:13px">Si después del cálculo una carta queda abajo del mínimo de su condición, se vende al mínimo. No cambia las cartas con precio fijo. Deja vacío para no usar mínimo en esa condición.</p></div>' +
+    '<div class="card stack"><h2 style="font-size:18px">Precio mínimo por rareza y condición (MXN)</h2>' +
+    '<div class="tbl-box"><table class="tbl" style="min-width:560px"><thead><tr><th>Rareza</th>' + CONDS.map(function (c) { return "<th>" + c + "</th>"; }).join("") + "</tr></thead><tbody>" +
+    RARS.map(function (r) { return "<tr><td><strong>" + RAR_LABEL[r] + "</strong></td>" + CONDS.map(function (c) { var v = minRarVal(pr, r, c); return '<td><input id="pr-min-' + r + "-" + c + '" type="number" min="0" step="0.5" value="' + (Number(v) > 0 ? v : "") + '" placeholder="—" class="mono dsel" style="width:90px" aria-label="Mínimo ' + RAR_LABEL[r] + " " + c + '"></td>'; }).join("") + "</tr>"; }).join("") +
+    "</tbody></table></div>" +
+    '<p class="muted" style="margin:0;font-size:13px">Si después del cálculo una carta queda abajo del mínimo de su rareza y condición, se vende al mínimo. No cambia las cartas con precio fijo. Deja vacío para no usar mínimo.</p></div>' +
     '<button type="submit" class="btn pri" style="align-self:flex-start">Guardar y recalcular</button></form>' +
     '<div class="b"><div class="card stack"><h2 style="font-size:18px">Así queda el precio</h2><p class="mono" style="margin:0;font-size:13px">Precio = base USD × tipo de cambio × (1 + margen) × condición</p>' +
     '<div class="tbl-box"><table class="tbl" style="min-width:520px"><thead><tr><th>Carta</th><th>Base</th><th>Fórmula</th><th>Público</th></tr></thead><tbody>' + sample + "</tbody></table></div></div></div></div>";
@@ -3478,7 +3486,7 @@ Object.assign(SUBMIT, {
   savePricing: function (f) {
     var s = curStore(), pr = s.pricing;
     pr.margin = Math.max(0, Number(f.querySelector("#pr-margin").value) || 0);
-    pr.minByCond = {}; CONDS.forEach(function (c) { var el = f.querySelector("#pr-min-" + c); pr.minByCond[c] = el ? Math.max(0, Number(el.value) || 0) : 0; }); delete pr.minPrice;
+    pr.minByRar = {}; RARS.forEach(function (r) { pr.minByRar[r] = {}; CONDS.forEach(function (c) { var el = f.querySelector("#pr-min-" + r + "-" + c); pr.minByRar[r][c] = el ? Math.max(0, Number(el.value) || 0) : 0; }); }); delete pr.minPrice;
     CONDS.forEach(function (c) { pr.cond[c] = Math.min(100, Math.max(1, Number(f.querySelector("#pr-" + c).value) || pr.cond[c])); });
     saveDB(); render(); toast("Precios recalculados");
   }
@@ -4125,12 +4133,19 @@ function buyCfg(s) {
   if (b.bulkMax == null) b.bulkMax = 30;
   if (b.bulkPrice == null) b.bulkPrice = 50;
   if (b.bulkPer == null) b.bulkPer = 100;
+  if (!b.bulkR) { b.bulkR = {}; RARS.forEach(function (r) { b.bulkR[r] = { max: Number(b.bulkMax) || 0, price: Number(b.bulkPrice) || 0 }; }); }
   if (b.bonus == null) b.bonus = 0;
   if (b.validDays == null) b.validDays = 7;
   if (b.roundDown == null) b.roundDown = false;
   return b;
 }
-function buySnap(s) { var b = buyCfg(s); return { pct: Object.assign({}, b.pct), wpct: Object.assign({}, b.wpct), bulkMax: b.bulkMax, bulkPrice: b.bulkPrice, bulkPer: b.bulkPer, bonus: b.bonus, roundDown: !!b.roundDown, fx: s.pricing.fx }; }
+/* Rarezas: común, infrecuente, rara, mítica y "otras" (especiales o sin rareza). */
+var RARS = ["common", "uncommon", "rare", "mythic", "other"];
+var RAR_LABEL = { common: "Común", uncommon: "Infrecuente", rare: "Rara", mythic: "Mítica", other: "Otras (especiales o sin rareza)" };
+var RAR_SHORT = { common: "comunes", uncommon: "infrecuentes", rare: "raras", mythic: "míticas", other: "otras" };
+function rarKey(r) { r = String(r || "").toLowerCase(); return RARS.indexOf(r) >= 0 && r !== "other" ? r : "other"; }
+function buyBulkOf(cfg, rar) { var t = cfg.bulkR && cfg.bulkR[rarKey(rar)]; return t ? { max: Number(t.max) || 0, price: Number(t.price) || 0 } : { max: Number(cfg.bulkMax) || 0, price: Number(cfg.bulkPrice) || 0 }; }
+function buySnap(s) { var b = buyCfg(s); return { pct: Object.assign({}, b.pct), wpct: Object.assign({}, b.wpct), bulkMax: b.bulkMax, bulkPrice: b.bulkPrice, bulkPer: b.bulkPer, bulkR: JSON.parse(JSON.stringify(b.bulkR)), bonus: b.bonus, roundDown: !!b.roundDown, fx: s.pricing.fx }; }
 function r2(n) { return Math.round(n * 100) / 100; }
 function buyUnit(cfg, base, cond, wish, mode) {
   if (base == null) return null;
@@ -4140,7 +4155,7 @@ function buyUnit(cfg, base, cond, wish, mode) {
   u = Math.max(0, u);
   return cfg.roundDown ? Math.floor(u) : r2(u);
 }
-function buyBulkTotal(cfg, qty) { var v = qty * Number(cfg.bulkPrice || 0) / Math.max(1, Number(cfg.bulkPer) || 1); return cfg.roundDown ? Math.floor(v) : r2(v); }
+function buyBulkTotal(cfg, qty, rar) { var v = qty * buyBulkOf(cfg, rar === undefined ? "common" : rar).price / Math.max(1, Number(cfg.bulkPer) || 1); return cfg.roundDown ? Math.floor(v) : r2(v); }
 function buyBase(ck, foil, fx) { if (!ck) return null; var u = foil ? ck[1] : ck[0]; return u == null ? null : r2(Number(u) * fx); }
 /* Precios completos de Card Kingdom (lista diaria repartida en 16 archivos por el primer carácter del id de Scryfall). */
 var CKF = { shards: {}, loading: {} };
@@ -4167,23 +4182,28 @@ function buyQuote(s, lines, mode, wantedLeft) {
   var cfg = buySnap(s), left = Object.assign({}, wantedLeft || {}), items = [];
   lines.forEach(function (l) {
     var base = buyBase(l.ck, l.foil, cfg.fx), k = norm(l.name), q = Math.max(1, Number(l.qty) || 1);
-    var common = { sfid: l.sfid, name: l.name, set: l.set, num: l.num, setName: l.setName, img: l.img || null, foil: !!l.foil, cond: l.cond || "NM", lang: l.lang || "EN", base: base, include: true, src: l.id };
+    var common = { sfid: l.sfid, rar: l.rar || null, name: l.name, set: l.set, num: l.num, setName: l.setName, img: l.img || null, foil: !!l.foil, cond: l.cond || "NM", lang: l.lang || "EN", base: base, include: true, src: l.id };
     var wq = base != null && left[k] > 0 ? Math.min(q, left[k]) : 0;
     if (wq) { left[k] -= wq; items.push(Object.assign({ id: l.id + "w", kind: "wish", qty: wq, unit: buyUnit(cfg, base, common.cond, true, mode) }, common)); }
     var nq = q - wq; if (!nq) return;
-    var kind = base == null ? "sinprecio" : base < Number(cfg.bulkMax || 0) ? "bulk" : "normal";
+    var kind = base == null ? "sinprecio" : base < buyBulkOf(cfg, l.rar).max ? "bulk" : "normal";
     items.push(Object.assign({ id: l.id + "n", kind: kind, qty: nq, unit: kind === "normal" ? buyUnit(cfg, base, common.cond, false, mode) : null }, common));
   });
   return { items: items, cfg: cfg };
 }
 function buyTotals(v) {
-  var cards = 0, bulkQ = 0, noPrice = 0, n = 0;
+  var cards = 0, bulkQ = 0, noPrice = 0, n = 0, by = {};
   (v.items || []).forEach(function (it) {
     if (!it.include) return; n += it.qty;
-    if (it.kind === "bulk") bulkQ += it.qty; else if (it.unit == null) noPrice += it.qty; else cards += it.unit * it.qty;
+    if (it.kind === "bulk") { bulkQ += it.qty; var rk = v.cfg.bulkR ? rarKey(it.rar) : "common"; by[rk] = (by[rk] || 0) + it.qty; } else if (it.unit == null) noPrice += it.qty; else cards += it.unit * it.qty;
   });
-  cards = r2(cards); var bulk = buyBulkTotal(v.cfg, bulkQ);
-  return { cards: cards, bulkQ: bulkQ, bulk: bulk, noPrice: noPrice, n: n, cash: v.mode === "pago" ? cards : 0, credit: r2((v.mode === "credito" ? cards : 0) + bulk), total: r2(cards + bulk) };
+  cards = r2(cards);
+  var bulkBy = (v.cfg.bulkR ? RARS : ["common"]).filter(function (r) { return by[r]; }).map(function (r) { return { rar: r, qty: by[r], total: buyBulkTotal(v.cfg, by[r], v.cfg.bulkR ? r : null) }; });
+  var bulk = r2(bulkBy.reduce(function (a, x) { return a + x.total; }, 0));
+  return { cards: cards, bulkQ: bulkQ, bulk: bulk, bulkBy: bulkBy, noPrice: noPrice, n: n, cash: v.mode === "pago" ? cards : 0, credit: r2((v.mode === "credito" ? cards : 0) + bulk), total: r2(cards + bulk) };
+}
+function buyBulkLines(T, cfg) {
+  return (T.bulkBy || []).map(function (x) { var t = buyBulkOf(cfg, cfg.bulkR ? x.rar : null); return x.qty + " " + (cfg.bulkR ? RAR_SHORT[x.rar] : "cartas") + " × " + money(t.price) + " por cada " + (cfg.bulkPer || 100) + " = " + money(x.total); }).join(" · ");
 }
 function buyExpired(v) { return v.validUntil && v.validUntil < todayISO() && (v.status === "pendiente" || v.status === "aprobada"); }
 function ventaNum(v) { return "V-" + String(v.number || 0).padStart(4, "0"); }
@@ -4312,7 +4332,7 @@ function sellListHTML(s) {
       '<span class="muted num" style="min-width:60px">× ' + it.qty + '</span><span class="price" style="min-width:110px;text-align:right">' + (it.unit == null ? "—" : money(it.unit * it.qty)) + "</span>" +
       '<button type="button" class="sbtn sm" data-act="sellDel" data-id="' + esc(it.src) + '">Quitar</button></div>';
   };
-  var bulkBox = bulk.length ? '<details class="panel" style="margin-top:4px"><summary class="row" style="justify-content:space-between;cursor:pointer"><span><strong>Bulk · ' + T.bulkQ + (T.bulkQ === 1 ? " carta" : " cartas") + '</strong> <span class="muted" style="font-size:13px">(valen menos de ' + money(Q.cfg.bulkMax) + " · se pagan " + money(Q.cfg.bulkPrice) + " por cada " + Q.cfg.bulkPer + ")</span></span><span class=\"price\">" + money(T.bulk) + ' <span class="muted" style="font-size:12px">en crédito</span></span></summary><div style="margin-top:10px">' + bulk.map(row).join("") + "</div></details>" : "";
+  var bulkBox = bulk.length ? '<details class="panel" style="margin-top:4px"><summary class="row" style="justify-content:space-between;cursor:pointer"><span><strong>Bulk · ' + T.bulkQ + (T.bulkQ === 1 ? " carta" : " cartas") + '</strong> <span class="muted" style="font-size:13px">(' + esc(buyBulkLines(T, Q.cfg)) + ")</span></span><span class=\"price\">" + money(T.bulk) + ' <span class="muted" style="font-size:12px">en crédito</span></span></summary><div style="margin-top:10px">' + bulk.map(row).join("") + "</div></details>" : "";
   var modeBox = '<div class="stack" style="gap:8px"><strong>¿Cómo quieres recibir el pago?</strong><div class="row" style="gap:8px">' +
     '<button type="button" class="sbtn' + (S.mode === "pago" ? " acc" : "") + '" data-act="sellMode" data-m="pago" aria-pressed="' + (S.mode === "pago") + '">Pago en efectivo</button>' +
     '<button type="button" class="sbtn' + (S.mode === "credito" ? " acc" : "") + '" data-act="sellMode" data-m="credito" aria-pressed="' + (S.mode === "credito") + '">Crédito en tienda' + (Q.cfg.bonus > 0 ? " (+" + Q.cfg.bonus + "%)" : "") + "</button></div>" +
@@ -4340,7 +4360,7 @@ function sellMine(s) {
     return '<details class="panel bord"' + (v.status === "aprobada" ? " open" : "") + '><summary class="row" style="justify-content:space-between;cursor:pointer"><span><strong class="mono">' + esc(ventaNum(v)) + '</strong> <span class="muted">' + fmtDay(v.createdAt) + " · " + (v.mode === "pago" ? "Pago en efectivo" : "Crédito en tienda") + "</span></span>" +
       '<span class="row" style="gap:12px"><span class="status">' + esc(st.client) + '</span><span class="price">' + money(T.total) + "</span></span></summary>" +
       '<div class="stack" style="margin-top:12px;gap:10px">' + note + '<div class="tbl-box"><table class="tbl"><thead><tr><th>Carta</th><th>Tipo</th><th class="num">Cant.</th><th class="num">Oferta</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
-      (T.bulkQ ? '<p style="margin:0">Bulk: ' + T.bulkQ + " cartas → " + money(T.bulk) + " en crédito</p>" : "") + "</div></details>";
+      (T.bulkQ ? '<p style="margin:0">Bulk: ' + esc(buyBulkLines(T, v.cfg)) + " → " + money(T.bulk) + " en crédito</p>" : "") + "</div></details>";
   }).join("");
 }
 /* Scryfall: sugerencias de nombre y versiones. */
@@ -4357,7 +4377,7 @@ function sellPickName(name) {
 function minUsd(p) { var t = p.prices && p.prices.tcgplayer || {}, v = [t.normal, t.foil, t.etched].filter(function (x) { return x != null; }); return v.length ? Math.min.apply(null, v) : null; }
 function sellLineFrom(p, opt) {
   var hasNormal = p.finishes.indexOf("normal") >= 0;
-  return { id: uid("sl"), sfid: p.id, name: p.name, set: p.set, num: p.num, setName: p.setName, img: p.img, finishes: p.finishes, foil: !!opt.foil || !hasNormal, cond: opt.cond || "NM", lang: opt.lang || "EN", qty: Math.max(1, Number(opt.qty) || 1) };
+  return { id: uid("sl"), sfid: p.id, rar: p.rarity || null, name: p.name, set: p.set, num: p.num, setName: p.setName, img: p.img, finishes: p.finishes, foil: !!opt.foil || !hasNormal, cond: opt.cond || "NM", lang: opt.lang || "EN", qty: Math.max(1, Number(opt.qty) || 1) };
 }
 Object.assign(INPUT, {
   sellQ: function (el) {
@@ -4479,7 +4499,7 @@ function admBuyDetail(s, v) {
         (g[0] === "bulk" ? '<td class="muted" style="font-size:13px">Precio de bulk</td><td></td>' :
           '<td><input type="number" min="0" step="0.5" class="mono dsel" style="width:96px" value="' + (it.unit == null ? "" : it.unit) + '" placeholder="Oferta" data-change="buyItem" data-id="' + it.id + '" data-k="unit"' + (edit ? "" : " disabled") + ">" + (it.manual ? ' <span class="pill" style="font-size:11px">manual</span>' : "") + '</td><td class="num" style="text-align:right;font-weight:600">' + (it.unit == null ? "—" : money(it.unit * it.qty)) + "</td>") + "</tr>";
     }).join("");
-    var extra = g[0] === "bulk" ? '<p class="muted" style="margin:0;font-size:13px">' + T.bulkQ + " cartas de bulk × " + money(v.cfg.bulkPrice) + " por cada " + v.cfg.bulkPer + " = <strong>" + money(T.bulk) + "</strong> en crédito.</p>" : "";
+    var extra = g[0] === "bulk" ? '<p class="muted" style="margin:0;font-size:13px">' + esc(buyBulkLines(T, v.cfg)) + " = <strong>" + money(T.bulk) + "</strong> en crédito.</p>" : "";
     if (g[0] === "wish") extra = '<p class="muted" style="margin:0;font-size:13px">Se pagan con el % de wishlist. Si otra solicitud ya cubrió lo que buscaban tus clientes, ajusta el precio.</p>';
     return '<section class="card stack"><h2 style="font-size:17px">' + g[1] + " (" + its.length + ")</h2>" + extra +
       '<div class="tbl-box"><table class="tbl" style="min-width:880px"><thead><tr><th>Carta</th><th></th><th>Foil</th><th>Estado</th><th>Cant.</th><th class="num">CK en pesos</th><th>Oferta c/u</th><th style="text-align:right">Subtotal</th></tr></thead><tbody>' + rows + "</tbody></table></div></section>";
@@ -4566,7 +4586,8 @@ Object.assign(ACT, {
     it.sfid = p.id; it.set = p.set; it.num = p.num; it.setName = p.setName; it.img = p.img; ui.modal = null;
     ckFullGet([p.id]).then(function (m) {
       it.base = buyBase(m[p.id], it.foil, v.cfg.fx);
-      if (it.kind === "sinprecio" && it.base != null) it.kind = it.base < v.cfg.bulkMax ? "bulk" : "normal";
+      it.rar = p.rarity || it.rar || null;
+      if (it.kind === "sinprecio" && it.base != null) it.kind = it.base < buyBulkOf(v.cfg, it.rar).max ? "bulk" : "normal";
       buyRecalc(v, it); buySyncLinks(v); buyLog(v, "Cambió la versión de «" + it.name + "» a " + p.set + " #" + p.num); saveDB(); render();
     });
   },
@@ -4584,7 +4605,8 @@ Object.assign(ACT, {
   buyCfgSave: function () {
     var s = curStore(), b = buyCfg(s), g = function (id) { var el = document.getElementById(id); return el ? el.value : ""; };
     CONDS.forEach(function (c) { b.pct[c] = Math.min(100, Math.max(0, Number(g("bc-p-" + c)) || 0)); b.wpct[c] = Math.min(100, Math.max(0, Number(g("bc-w-" + c)) || 0)); });
-    b.bulkMax = Math.max(0, Number(g("bc-bmax")) || 0); b.bulkPrice = Math.max(0, Number(g("bc-bprice")) || 0); b.bulkPer = Math.max(1, parseInt(g("bc-bper"), 10) || 1);
+    RARS.forEach(function (r) { b.bulkR[r] = { max: Math.max(0, Number(g("bc-bmax-" + r)) || 0), price: Math.max(0, Number(g("bc-bprice-" + r)) || 0) }; });
+    b.bulkPer = Math.max(1, parseInt(g("bc-bper"), 10) || 1);
     b.bonus = Math.max(0, Number(g("bc-bonus")) || 0); b.validDays = Math.max(1, parseInt(g("bc-days"), 10) || 7); b.roundDown = !!(document.getElementById("bc-round") || {}).checked;
     auditLog(s.id, "Compras a clientes", "Actualizó la configuración de compra de cartas", tabAuditUser());
     saveDB(); render(); toast("Configuración guardada");
@@ -4633,11 +4655,13 @@ function admBuyCfg(s) {
     '<p class="muted" style="margin:0">Cartas normales</p><div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">' + pctRow("p", b.pct) + "</div>" +
     '<p class="muted" style="margin:0">Cartas que están en la wishlist de tus clientes</p><div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">' + pctRow("w", b.wpct) + "</div>" +
     '<p class="hint" style="margin:0">Ejemplo con una carta NM de ' + money(ex) + ": normal se ofrecen " + money(exN) + "; si está en wishlist, " + money(exW) + ".</p></div>" +
-    '<div class="card stack"><h2 style="font-size:18px">Bulk</h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">' +
-    '<label class="field" for="bc-bmax">Es bulk si vale menos de (MXN)<input id="bc-bmax" type="number" min="0" step="0.5" value="' + b.bulkMax + '" class="mono"></label>' +
-    '<label class="field" for="bc-bprice">Pagas (MXN)<input id="bc-bprice" type="number" min="0" step="0.5" value="' + b.bulkPrice + '" class="mono"></label>' +
-    '<label class="field" for="bc-bper">Por cada (cartas)<input id="bc-bper" type="number" min="1" step="1" value="' + b.bulkPer + '" class="mono"></label></div>' +
-    '<p class="hint" style="margin:0">Con ' + money(b.bulkPrice) + " por cada " + b.bulkPer + " cartas: 150 cartas de bulk = " + money(buyBulkTotal(buySnap(s), 150)) + ". El bulk siempre se paga en crédito; si una carta está en wishlist no cuenta como bulk.</p></div>" +
+    '<div class="card stack"><h2 style="font-size:18px">Bulk por rareza</h2>' +
+    '<p class="muted" style="margin:0">Si una carta vale menos del límite de su rareza (precio de Card Kingdom en pesos), se paga como bulk.</p>' +
+    '<div class="tbl-box"><table class="tbl" style="min-width:520px"><thead><tr><th>Rareza</th><th>Es bulk si vale menos de (MXN)</th><th>Pagas (MXN) por cada ' + b.bulkPer + '</th></tr></thead><tbody>' +
+    RARS.map(function (r) { var t = b.bulkR[r]; return "<tr><td><strong>" + RAR_LABEL[r] + '</strong></td><td><input id="bc-bmax-' + r + '" type="number" min="0" step="0.5" value="' + t.max + '" class="mono dsel" style="width:120px" aria-label="Límite de bulk ' + RAR_LABEL[r] + '"></td><td><input id="bc-bprice-' + r + '" type="number" min="0" step="0.5" value="' + t.price + '" class="mono dsel" style="width:120px" aria-label="Pago de bulk ' + RAR_LABEL[r] + '"></td></tr>'; }).join("") +
+    "</tbody></table></div>" +
+    '<label class="field" for="bc-bper" style="max-width:220px">Por cada (cartas)<input id="bc-bper" type="number" min="1" step="1" value="' + b.bulkPer + '" class="mono"></label>' +
+    '<p class="hint" style="margin:0">Ejemplo: 150 comunes de bulk = ' + money(buyBulkTotal(buySnap(s), 150, "common")) + " · 150 infrecuentes de bulk = " + money(buyBulkTotal(buySnap(s), 150, "uncommon")) + ". El bulk siempre se paga en crédito; si una carta está en wishlist no cuenta como bulk.</p></div>" +
     '<div class="card stack"><h2 style="font-size:18px">Otras reglas</h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">' +
     '<label class="field" for="bc-bonus">Bono si elige crédito (%)<input id="bc-bonus" type="number" min="0" step="1" value="' + b.bonus + '" class="mono"></label>' +
     '<label class="field" for="bc-days">Vigencia de la oferta (días)<input id="bc-days" type="number" min="1" step="1" value="' + b.validDays + '" class="mono"></label></div>' +
@@ -4788,6 +4812,67 @@ Object.assign(CHANGE, { useCredit: function (el) { ui.useCredit = el.checked; re
   };
 })();
 
+/* ---- Buscar en todo Magic (Scryfall): el cliente encuentra cualquier carta y la manda a su wishlist ---- */
+var ALLS = { q: "", state: "idle", names: [] };
+db.wishCards = db.wishCards || {};
+function allBoxHTML() {
+  var q = String(ui.filters.q || "").trim();
+  if (q.length < 3) return "";
+  var head = '<section class="panel stack" style="gap:10px;margin-top:14px"><div class="row" style="justify-content:space-between;gap:10px"><div><strong>¿No la encuentras o buscas otra versión?</strong><br><span class="muted" style="font-size:14px">Búscala en todo Magic y mándala a tu wishlist: la tienda la consigue para ti.</span></div>';
+  if (ALLS.q !== q || ALLS.state === "idle") return head + '<button type="button" class="sbtn acc" data-act="allSearch">Buscar «' + esc(q) + '» en todo Magic</button></div></section>';
+  if (ALLS.state === "loading") return head + '</div><p class="muted" style="margin:0">Buscando…</p></section>';
+  if (ALLS.state === "error") return head + '<button type="button" class="sbtn" data-act="allSearch">Reintentar</button></div><p class="muted" style="margin:0">No se pudo consultar en este momento. Inténtalo otra vez.</p></section>';
+  if (!ALLS.names.length) return head + '</div><p class="muted" style="margin:0">No encontramos ninguna carta de Magic con «' + esc(q) + "».</p></section>";
+  return head + '</div><div class="row" style="gap:8px">' + ALLS.names.slice(0, 20).map(function (n) { return '<button type="button" class="chip" data-act="allName" data-name="' + esc(n) + '">' + esc(n) + "</button>"; }).join("") + "</div></section>";
+}
+var _allRenderResults = renderResults;
+renderResults = function () {
+  _allRenderResults.apply(this, arguments);
+  var el = document.getElementById("results"); if (!el) return;
+  var box = document.getElementById("all-box");
+  if (!box) { box = document.createElement("div"); box.id = "all-box"; el.parentNode.insertBefore(box, el.nextSibling); }
+  box.innerHTML = allBoxHTML();
+};
+function allInStock(s, id) { return (db.inventory || []).filter(function (i) { return i.storeId === s.id && i.printId === id && Number(i.qty) > 0; }).length > 0; }
+function allPrintsModal(m) {
+  var s = curStore(), w = db.buyer ? wishOf(s.id) : [];
+  var body;
+  if (m.loading) body = '<p class="muted">Buscando todas las versiones…</p>';
+  else if (!m.prints.length) body = '<p class="muted">No se pudieron cargar las versiones. Inténtalo otra vez.</p>';
+  else body = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px">' + m.prints.map(function (p) {
+    var has = allInStock(s, p.id), inW = w.indexOf(p.id) >= 0;
+    var btn = has ? '<button type="button" class="sbtn sm acc" data-act="allSee" data-id="' + p.id + '">Disponible: ver</button>'
+      : inW ? '<span class="status">En tu wishlist</span>'
+      : '<button type="button" class="sbtn sm" data-act="allWish" data-id="' + p.id + '">' + ICON.heart + "Wishlist</button>";
+    return '<div class="stack" style="gap:6px">' + cardImg(p, {}) + '<span class="code" style="font-size:12px">' + esc(p.set + " · #" + p.num) + "<br>" + esc(p.setName || "") + "</span>" + btn + "</div>";
+  }).join("") + "</div>";
+  return '<div class="dlg store st" style="' + storeVars(s).css + '"><button class="x" type="button" data-act="closeModal" aria-label="Cerrar">×</button><div class="stack" style="padding:4px"><h2 style="font-size:22px">' + esc(m.name) + "</h2>" +
+    '<p class="muted" style="margin:0">Elige la versión que buscas. Si la tienda no la tiene, mándala a tu wishlist y la tienda la busca para ti.</p>' + body + "</div></div>";
+}
+var _allExtraModal = extraModal;
+extraModal = function (m) { if (m.type === "allPrints") return allPrintsModal(m); return _allExtraModal(m); };
+Object.assign(ACT, {
+  allSearch: function () {
+    var q = String(ui.filters.q || "").trim(); if (q.length < 3) return;
+    ALLS.q = q; ALLS.state = "loading"; ALLS.names = []; renderResults();
+    sfFetch("https://api.scryfall.com/cards/autocomplete?include_extras=false&q=" + encodeURIComponent(q))
+      .then(function (r) { if (ALLS.q !== q) return; ALLS.names = r.data || []; ALLS.state = "ok"; renderResults(); if (ALLS.names.length === 1) ACT.allName({ dataset: { name: ALLS.names[0] } }); })
+      .catch(function () { if (ALLS.q !== q) return; ALLS.state = "error"; renderResults(); });
+  },
+  allName: function (el) {
+    var name = el.dataset.name;
+    openModal({ type: "allPrints", name: name, loading: true, prints: [] });
+    scryfallPrints(name).then(function (ps) { if (ui.modal && ui.modal.type === "allPrints" && ui.modal.name === name) { ui.modal.prints = ps; ui.modal.loading = false; renderModal(); } })
+      .catch(function () { if (ui.modal && ui.modal.type === "allPrints") { ui.modal.loading = false; renderModal(); } });
+  },
+  allSee: function (el) { openModal({ type: "card", printId: el.dataset.id, qty: 1 }); },
+  allWish: function (el) {
+    var m = ui.modal, p = m && (m.prints || []).filter(function (x) { return x.id === el.dataset.id; })[0]; if (!p) return;
+    if (!db.catalog[p.id]) addToCatalog(p);
+    db.wishCards[p.id] = db.catalog[p.id];
+    ACT.wishToggle({ dataset: { id: p.id } });
+  }
+});
 window.addEventListener("hashchange", function () { applyRoute(); });
 db.stores.forEach(function (x) { if (x.pricing.fxMode !== "manual") { x.pricing.fxMode = "manual"; x.pricing.fx = x.pricing.manualFx || x.pricing.fx; } });
 if (!db.blankDone) { (function () { var s = db.stores.filter(function (x) { return x.id === "store-dr"; })[0] || db.stores[0]; db.stores = [s]; ["inventory","products","orders","events","payments","internal","promos","clients","tabs","clientPays","audit"].forEach(function (k) { db[k] = []; }); db.carts = {}; db.wishlists = {}; db.wishMeta = {}; db.buyerInfo = {}; db.buyer = null; db.wishSeeded = true; s.categories = []; s.nextOrder = 1001; s.theme.slides = []; s.adminEmail = ""; s.info.address = ""; s.info.whatsapp = ""; s.info.hours = ""; db.blankDone = true; })(); }
@@ -4842,7 +4927,17 @@ function fbPubData() {
 function fbPrivData() { return { credits: db.credits || [], pos: db.pos || [], posSeq: db.posSeq || 0, clients: db.clients || [], tabs: db.tabs || [], clientPays: db.clientPays || [], audit: (db.audit || []).slice(0, 500), internal: db.internal || [], promos: db.promos || [] }; }
 function fbMeData() {
   var b = db.buyer || {}, s = fbStore(), k = FB.user.uid;
-  return { name: b.name || "", email: (FB.user.email || "").toLowerCase(), phone: b.phone || "", photo: b.avatar || "", wishlist: ((db.wishlists[k] || {})[s.id]) || [], wishMeta: (((db.wishMeta || {})[k] || {})[s.id]) || {}, createdAt: FB.meCreated || Date.now() };
+  return { name: b.name || "", email: (FB.user.email || "").toLowerCase(), phone: b.phone || "", photo: b.avatar || "", wishlist: ((db.wishlists[k] || {})[s.id]) || [], wishMeta: (((db.wishMeta || {})[k] || {})[s.id]) || {}, wishCards: fbWishCards(((db.wishlists[k] || {})[s.id]) || []), createdAt: FB.meCreated || Date.now() };
+}
+/* Cartas de la wishlist que la tienda no maneja: viajan en la ficha del cliente para que el panel las vea. */
+function fbWishCards(ids) {
+  var out = {}, wc = db.wishCards || {};
+  ids.forEach(function (id) { if (String(id).indexOf("p:") === 0 || !wc[id]) return; var p = wc[id]; out[id] = { id: p.id, name: p.name, set: p.set, setName: p.setName, num: p.num, color: p.color, type: p.type, rarity: p.rarity, finishes: p.finishes, prices: p.prices, img: p.img, legal: p.legal, mana: p.mana, source: "scryfall" }; });
+  return out;
+}
+function fbTakeWishCards(d) {
+  var m = (d && d.wishCards) || {}; db.wishCards = db.wishCards || {};
+  Object.keys(m).forEach(function (id) { if (!db.catalog[id]) db.catalog[id] = m[id]; db.wishCards[id] = db.catalog[id]; });
 }
 function fbApplyPub(d) {
   if (!d || !d.store) return;
@@ -5138,7 +5233,7 @@ function fbMergeAllClients() {
   db.wishMeta = db.wishMeta || {}; db.buyerInfo = db.buyerInfo || {};
   Object.keys(FB.cliDocs).forEach(function (uid) {
     var d = FB.cliDocs[uid], em = (d.email || "").toLowerCase();
-    db.wishlists[uid] = {}; db.wishlists[uid][s.id] = d.wishlist || [];
+    db.wishlists[uid] = {}; db.wishlists[uid][s.id] = d.wishlist || []; fbTakeWishCards(d);
     db.wishMeta[uid] = {}; db.wishMeta[uid][s.id] = d.wishMeta || {};
     db.buyerInfo[uid] = { name: d.name, email: em, phone: d.phone };
     if (!FB.privOK || (FB.admins || []).map(function (x) { return x.toLowerCase(); }).indexOf(em) >= 0) return;
@@ -5226,7 +5321,7 @@ function fbOnCustomer(u) {
     var d = snap.exists ? JSON.parse(snap.data().json) : { name: u.displayName || em, email: em, phone: "", photo: u.photoURL || "", wishlist: [], wishMeta: {}, createdAt: Date.now() };
     db.buyer = { id: u.uid, name: d.name || u.displayName || em, email: em, phone: d.phone || "", avatar: d.photo || u.photoURL || null };
     var s = fbStore();
-    db.wishlists[u.uid] = {}; db.wishlists[u.uid][s.id] = d.wishlist || [];
+    db.wishlists[u.uid] = {}; db.wishlists[u.uid][s.id] = d.wishlist || []; fbTakeWishCards(d);
     db.wishMeta = db.wishMeta || {}; db.wishMeta[u.uid] = {}; db.wishMeta[u.uid][s.id] = d.wishMeta || {};
     FB.meCreated = d.createdAt || Date.now(); FB.lastMe = snap.exists ? snap.data().json : null; FB.meOK = true;
     if (!snap.exists) { fbFlush(); toast("¡Bienvenido a " + s.name + "!"); }
