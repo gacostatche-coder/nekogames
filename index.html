@@ -4829,9 +4829,10 @@ var _allRenderResults = renderResults;
 renderResults = function () {
   _allRenderResults.apply(this, arguments);
   var el = document.getElementById("results"); if (!el) return;
-  var box = document.getElementById("all-box");
+  var top = document.getElementById("all-box-top"), box = document.getElementById("all-box");
+  if (!top) { top = document.createElement("div"); top.id = "all-box-top"; top.style.marginBottom = "4px"; el.parentNode.insertBefore(top, el); }
   if (!box) { box = document.createElement("div"); box.id = "all-box"; el.parentNode.insertBefore(box, el.nextSibling); }
-  box.innerHTML = allBoxHTML();
+  var h = allBoxHTML(); box.innerHTML = h; top.innerHTML = h.replace("margin-top:14px", "margin-top:0");
 };
 function allInStock(s, id) { return (db.inventory || []).filter(function (i) { return i.storeId === s.id && i.printId === id && Number(i.qty) > 0; }).length > 0; }
 function allPrintsModal(m) {
