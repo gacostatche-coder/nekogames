@@ -5277,16 +5277,42 @@ Object.assign(ACT, {
 });
 
 /* ---- Tienda: clientes con su cuenta de Google ---- */
+/* Navegadores dentro de apps (Instagram, Facebook, TikTok, etc.): Google no permite entrar desde ahí. */
+function fbInApp() { return /FBAN|FBAV|FB_IAB|Instagram|Line\/|TikTok|musical_ly|Snapchat|; wv\)|WhatsApp/i.test(navigator.userAgent || ""); }
 function fbSignIn() {
+  if (fbInApp()) { fbLoginHelp("inapp"); return; }
   var p = new firebase.auth.GoogleAuthProvider();
   p.setCustomParameters({ prompt: "select_account" });
+  /* Siempre con ventana emergente: el modo "redirect" falla en iPhone/Safari porque la tienda y Firebase están en dominios distintos. */
   fauth.signInWithPopup(p).catch(function (e) {
-    if (e && (e.code === "auth/popup-blocked" || e.code === "auth/operation-not-supported-in-this-environment")) return fauth.signInWithRedirect(p);
-    if (e && (e.code === "auth/popup-closed-by-user" || e.code === "auth/cancelled-popup-request")) { FB.then = null; return; }
-    if (e && e.code === "auth/unauthorized-domain") { toast("Este dominio no está autorizado en Firebase"); return; }
-    fbErr(e); toast("No se pudo entrar con Google. Inténtalo otra vez.");
+    var c = e && e.code;
+    if (c === "auth/popup-closed-by-user" || c === "auth/cancelled-popup-request") { FB.then = null; return; }
+    if (c === "auth/popup-blocked" || c === "auth/operation-not-supported-in-this-environment" || c === "auth/web-storage-unsupported") { fbLoginHelp("blocked"); return; }
+    if (c === "auth/unauthorized-domain") { toast("Este dominio no está autorizado en Firebase"); return; }
+    if (c === "auth/network-request-failed") { toast("Sin conexión. Revisa tu internet e inténtalo otra vez."); return; }
+    fbErr(e); fbLoginHelp("error");
   });
 }
+function fbLoginHelp(why) { _fbOpenModal({ type: "loginHelp", why: why, then: FB.then }); }
+function fbLoginHelpHTML(m) {
+  var s = curStore(), url = location.href.split("#")[0];
+  var msg = m.why === "inapp"
+    ? "Estás viendo la tienda dentro de otra app (por ejemplo Instagram o Facebook). Google no permite iniciar sesión desde ahí. Ábrela en <strong>Safari</strong> o <strong>Chrome</strong>: toca los tres puntos (⋯) o el ícono de compartir y elige «Abrir en el navegador»."
+    : m.why === "blocked"
+      ? "Tu navegador bloqueó la ventana de Google. Toca el botón de abajo para intentarlo otra vez. Si vuelve a pasar, abre la tienda en <strong>Safari</strong> o <strong>Chrome</strong> y revisa que las ventanas emergentes estén permitidas."
+      : "No se pudo entrar con Google. Toca el botón para intentarlo otra vez. Si sigue fallando, abre la tienda en <strong>Safari</strong> o <strong>Chrome</strong>.";
+  return '<div class="dlg store st sm" style="' + storeVars(s).css + '"><button class="x" type="button" data-act="closeModal" aria-label="Cerrar">×</button><div class="stack" style="padding:4px">' +
+    '<h2 style="font-size:22px">Entrar con Google</h2><p style="margin:0;line-height:1.5">' + msg + "</p>" +
+    '<p class="muted" style="margin:0;font-size:13px">Tu cuenta, tus pedidos y tu wishlist están a salvo; solo es la forma de entrar.</p>' +
+    '<div class="row" style="gap:8px;flex-wrap:wrap">' + (m.why === "inapp" ? "" : '<button type="button" class="sbtn acc" data-act="fbRetry">Entrar con Google</button>') +
+    '<button type="button" class="sbtn" data-act="fbCopyUrl" data-url="' + esc(url) + '">Copiar liga de la tienda</button></div></div></div>';
+}
+var _fbLhExtra = typeof extraModal === "function" ? extraModal : function () { return ""; };
+extraModal = function (m) { if (m && m.type === "loginHelp") return fbLoginHelpHTML(m); return _fbLhExtra(m); };
+Object.assign(ACT, {
+  fbRetry: function () { var m = ui.modal; FB.then = (m && m.then) || null; ui.modal = null; renderModal(); fbSignIn(); },
+  fbCopyUrl: function (el) { copyText(el.dataset.url, "Liga copiada. Pégala en Safari o Chrome."); }
+});
 function fbRunThen() {
   var t = FB.then; FB.then = null; if (!t) return;
   if (t.act === "wish") { var w = wishOf(curStore().id); if (w.indexOf(t.id) < 0) w.push(t.id); saveDB(); ui.modal = t.back || null; render(); }
