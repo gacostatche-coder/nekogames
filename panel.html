@@ -4465,8 +4465,8 @@ function admBuy(s) {
   var seg = function (id, l, n) { return '<button type="button" data-act="buyTab" data-t="' + id + '" aria-pressed="' + (t === id) + '">' + l + (n ? ' <span class="pill warn" style="padding:0 6px">' + n + "</span>" : "") + "</button>"; };
   var porPagar = posOf(s).filter(function (o) { return o.status === "por_pagar"; }).length;
   return '<div class="head"><div><h1>Compras a clientes</h1><p class="muted" style="margin:0">Las cartas que tus clientes te quieren vender desde «Vende tus cartas».</p></div></div>' +
-    '<div class="seg" role="group" aria-label="Sección">' + seg("sol", "Solicitudes", buyPendingCount(s)) + seg("oc", "Órdenes de compra", porPagar) + seg("cfg", "Configuración") + "</div>" +
-    (t === "oc" ? admPOs(s) : t === "cfg" ? admBuyCfg(s) : admBuyList(s));
+    '<div class="seg" role="group" aria-label="Sección">' + seg("sol", "Solicitudes", buyPendingCount(s)) + seg("oc", "Órdenes de compra", porPagar) + seg("carga", "Por cargar al inventario", loadPendingQty(s)) + seg("cfg", "Configuración") + "</div>" +
+    (t === "oc" ? admPOs(s) : t === "carga" ? admLoad(s) : t === "cfg" ? admBuyCfg(s) : admBuyList(s));
 }
 function admBuyList(s) {
   var F = ui.buyF || "abiertas", all = ventasOf(s).sort(function (a, b) { return b.createdAt - a.createdAt; });
@@ -4476,12 +4476,12 @@ function admBuyList(s) {
     var T = buyTotals(v), st = BUY_STATUS[v.status], exp = buyExpired(v);
     return '<tr><td><button type="button" class="linkbtn" data-act="buyOpen" data-id="' + v.id + '" style="font-weight:600;text-decoration:none">' + esc(ventaNum(v)) + "</button></td><td>" + esc(v.buyer ? v.buyer.name : "") + '</td><td class="muted" style="font-size:13px">' + fmtDay(v.createdAt) + "</td>" +
       '<td class="num">' + T.n + (T.bulkQ ? ' <span class="muted" style="font-size:12px">(' + T.bulkQ + " bulk)</span>" : "") + "</td><td>" + (v.mode === "pago" ? "Pago" : "Crédito") + '</td><td class="num" style="text-align:right;font-weight:600">' + money(T.total) + "</td>" +
-      '<td><span class="pill ' + st.cls + '">' + st.label + "</span></td>" +
+      '<td><span class="pill ' + st.cls + '">' + st.label + "</span></td><td>" + loadPill(v) + "</td>" +
       '<td style="font-size:13px' + (exp ? ";color:var(--bad);font-weight:700" : "") + '">' + (v.validUntil ? fmtISO(v.validUntil) : "—") + (exp ? " · vencida" : "") + '</td><td><button type="button" class="btn sm" data-act="buyOpen" data-id="' + v.id + '">Revisar</button></td></tr>';
   }).join("");
   return '<div class="row" style="gap:10px"><label class="field" for="buy-f" style="max-width:260px">Mostrar<select id="buy-f" data-change="buyF">' + opt("abiertas", "Abiertas (por revisar y por recibir)") + opt("pendiente", "Pendientes de revisión") + opt("aprobada", "Aprobadas, por recibir") + opt("completada", "Recibidas") + opt("rechazada", "Rechazadas") + opt("todas", "Todas") + "</select></label></div>" +
-    '<div class="tbl-box"><table class="tbl" style="min-width:900px"><thead><tr><th>Solicitud</th><th>Cliente</th><th>Fecha</th><th class="num">Cartas</th><th>Modalidad</th><th style="text-align:right">Oferta</th><th>Estado</th><th>Vigencia</th><th></th></tr></thead><tbody>' +
-    (rows || '<tr><td colspan="9" class="muted" style="text-align:center;padding:24px">No hay solicitudes con este filtro.</td></tr>') + "</tbody></table></div>";
+    '<div class="tbl-box"><table class="tbl" style="min-width:900px"><thead><tr><th>Solicitud</th><th>Cliente</th><th>Fecha</th><th class="num">Cartas</th><th>Modalidad</th><th style="text-align:right">Oferta</th><th>Estado</th><th>Inventario</th><th>Vigencia</th><th></th></tr></thead><tbody>' +
+    (rows || '<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">No hay solicitudes con este filtro.</td></tr>') + "</tbody></table></div>";
 }
 function admBuyDetail(s, v) {
   var T = buyTotals(v), st = BUY_STATUS[v.status], edit = v.status === "pendiente" || v.status === "aprobada", exp = buyExpired(v);
@@ -4491,7 +4491,7 @@ function admBuyDetail(s, v) {
   var sec = groups.map(function (g) {
     var its = (v.items || []).filter(function (i) { return i.kind === g[0]; }); if (!its.length) return "";
     var rows = its.map(function (it) {
-      return '<tr class="' + (it.include ? "" : "muted") + '"><td><label class="row" style="gap:8px;flex-wrap:nowrap"><input type="checkbox" data-change="buyItem" data-id="' + it.id + '" data-k="include"' + (it.include ? " checked" : "") + (edit ? "" : " disabled") + ' style="width:18px;height:18px"><span><strong>' + esc(it.name) + '</strong><br><span class="mono muted" style="font-size:12px">' + esc(it.set + " #" + it.num + langSuffix(it.lang)) + "</span></span></label></td>" +
+      return '<tr class="' + (it.include ? "" : "muted") + '"><td><label class="row" style="gap:8px;flex-wrap:nowrap"><input type="checkbox" data-change="buyItem" data-id="' + it.id + '" data-k="include"' + (it.include ? " checked" : "") + (edit ? "" : " disabled") + ' style="width:18px;height:18px">' + (cardView() === "img" ? cvThumb(it) : "") + '<span><strong>' + esc(it.name) + '</strong><br><span class="mono muted" style="font-size:12px">' + esc(it.set + " #" + it.num + langSuffix(it.lang)) + "</span></span></label></td>" +
         "<td>" + (edit ? '<button type="button" class="btn sm" data-act="buyVersion" data-id="' + it.id + '">Cambiar versión</button>' : "") + "</td>" +
         '<td><label class="row" style="gap:6px"><input type="checkbox" data-change="buyItem" data-id="' + it.id + '" data-k="foil"' + (it.foil ? " checked" : "") + (edit ? "" : " disabled") + ' style="width:18px;height:18px">Foil</label></td>' +
         "<td>" + condSel(it) + '</td><td><input type="number" min="0" class="mono dsel" style="width:70px" value="' + it.qty + '" data-change="buyItem" data-id="' + it.id + '" data-k="qty"' + (edit ? "" : " disabled") + "></td>" +
@@ -4501,8 +4501,12 @@ function admBuyDetail(s, v) {
     }).join("");
     var extra = g[0] === "bulk" ? '<p class="muted" style="margin:0;font-size:13px">' + esc(buyBulkLines(T, v.cfg)) + " = <strong>" + money(T.bulk) + "</strong> en crédito.</p>" : "";
     if (g[0] === "wish") extra = '<p class="muted" style="margin:0;font-size:13px">Se pagan con el % de wishlist. Si otra solicitud ya cubrió lo que buscaban tus clientes, ajusta el precio.</p>';
-    return '<section class="card stack"><h2 style="font-size:17px">' + g[1] + " (" + its.length + ")</h2>" + extra +
-      '<div class="tbl-box"><table class="tbl" style="min-width:880px"><thead><tr><th>Carta</th><th></th><th>Foil</th><th>Estado</th><th>Cant.</th><th class="num">CK en pesos</th><th>Oferta c/u</th><th style="text-align:right">Subtotal</th></tr></thead><tbody>' + rows + "</tbody></table></div></section>";
+    var inc = its.filter(function (i) { return i.include; }), qn = inc.reduce(function (a, i) { return a + (Number(i.qty) || 0); }, 0);
+    var tot = g[0] === "bulk" ? T.bulk : r2(inc.reduce(function (a, i) { return a + (i.unit == null ? 0 : i.unit * i.qty); }, 0));
+    var foot = '<tfoot><tr style="border-top:2px solid var(--line)"><td colspan="4" style="text-align:right;font-weight:800">TOTAL ' + esc(g[1].split(":")[0].toUpperCase()) + '</td><td class="num" style="font-weight:700">' + qn + '</td><td></td><td></td><td style="text-align:right;font-weight:800;font-size:16px">' + money(tot) + "</td></tr></tfoot>";
+    var body = cardView() === "gal" ? cvGallery(its, edit) + '<p style="margin:0;text-align:right;font-weight:800">TOTAL: ' + qn + " cartas · " + money(tot) + "</p>"
+      : '<div class="tbl-box"><table class="tbl" style="min-width:880px"><thead><tr><th>Carta</th><th></th><th>Foil</th><th>Estado</th><th>Cant.</th><th class="num">CK en pesos</th><th>Oferta c/u</th><th style="text-align:right">Subtotal</th></tr></thead><tbody>' + rows + "</tbody>" + foot + "</table></div>";
+    return '<section class="card stack"><h2 style="font-size:17px">' + g[1] + " (" + its.length + ")</h2>" + extra + body + "</section>";
   }).join("");
   var cr = c ? creditAvail(c) : 0;
   var actions = v.status === "pendiente" ? '<button type="button" class="btn" data-act="buyReject">Rechazar</button><button type="button" class="btn pri" data-act="buyApprove"' + (T.noPrice ? " disabled title=\"Pon oferta a las cartas sin precio o desmárcalas\"" : "") + ">Aprobar oferta</button>"
@@ -4520,7 +4524,10 @@ function admBuyDetail(s, v) {
     (exp ? '<span class="pill bad" style="white-space:normal;border-radius:8px">La vigencia ya pasó: decide si mantienes los precios o los cambias.</span>' : "") +
     (c ? '<span class="muted" style="font-size:13px">Crédito actual del cliente: <strong>' + money(cr) + "</strong></span>" : "") + "</div>" +
     (T.noPrice ? '<p class="pill warn" style="white-space:normal;border-radius:8px;margin:0">Hay ' + T.noPrice + " cartas sin precio: escribe tu oferta o desmárcalas para poder continuar.</p>" : "") +
-    (v.rejectReason ? '<p class="muted" style="margin:0">Motivo de rechazo: ' + esc(v.rejectReason) + "</p>" : "") + sec +
+    (v.rejectReason ? '<p class="muted" style="margin:0">Motivo de rechazo: ' + esc(v.rejectReason) + "</p>" : "") + loadStatusHTML(v) + cardViewBar() + sec +
+    '<section class="card"><div class="row" style="justify-content:space-between;gap:12px;flex-wrap:wrap"><strong style="font-size:17px">Total de la solicitud</strong>' +
+    '<div style="text-align:right;line-height:1.6">' + (v.mode === "pago" ? "Cartas en efectivo" : "Cartas en crédito") + ": <strong>" + money(T.cards) + "</strong>" + (T.bulk ? "<br>Bulk en crédito: <strong>" + money(T.bulk) + "</strong>" : "") +
+    '<br><span style="font-size:20px;font-weight:800;color:var(--ok)">TOTAL: ' + money(T.total) + "</span>" + (v.mode === "pago" && T.bulk ? '<br><span class="muted" style="font-size:13px">Pagas en efectivo ' + money(T.cards) + " y das " + money(T.bulk) + " en crédito</span>" : "") + "</div></div></section>" +
     '<section class="card stack"><h2 style="font-size:17px">Historial</h2><ul style="margin:0;padding-left:18px">' + (v.log || []).map(function (l) { return "<li><span class=\"muted\">" + fmtDay(l.date) + "</span> · " + esc(l.text) + "</li>"; }).join("") + "</ul></section>";
 }
 /* Al cambiar la venta se actualizan su orden de compra y su crédito pendiente. */
@@ -4562,9 +4569,9 @@ Object.assign(ACT, {
     if (oc) { oc.amount = T.cash; oc.status = T.cash > 0 ? "por_pagar" : "cancelada"; oc.receivedAt = Date.now(); }
     var cm = v.creditId && db.credits.filter(function (m) { return m.id === v.creditId; })[0];
     if (cm) { cm.amount = T.credit; cm.status = T.credit > 0 ? "disponible" : "cancelado"; cm.note = "Cartas recibidas en tienda"; cm.at = Date.now(); }
-    v.status = "completada"; v.receivedAt = Date.now(); buyLog(v, "Cartas recibidas. " + (T.cash ? "Por pagar: " + money(T.cash) + ". " : "") + (T.credit ? "Crédito liberado: " + money(T.credit) + "." : ""));
+    v.status = "completada"; v.receivedAt = Date.now(); loadBuild(v); buyLog(v, "Cartas recibidas. " + (T.cash ? "Por pagar: " + money(T.cash) + ". " : "") + (T.credit ? "Crédito liberado: " + money(T.credit) + "." : ""));
     auditLog(s.id, "Compras a clientes", "Recibió las cartas de " + ventaNum(v) + (T.credit ? " y liberó " + money(T.credit) + " de crédito" : "") + (T.cash ? " · orden de compra por pagar " + money(T.cash) : ""), tabAuditUser());
-    ui.modal = null; saveDB(); render(); toast(T.credit ? "Crédito liberado: " + money(T.credit) : "Cartas recibidas. La orden de compra quedó por pagar.");
+    ui.modal = null; saveDB(); render(); toast((T.credit ? "Crédito liberado: " + money(T.credit) : "Cartas recibidas. La orden de compra quedó por pagar.") + " Las cartas quedaron en «Por cargar al inventario».");
   },
   buyReject: function () { openModal({ type: "buyReject", id: ui.buyId }); },
   buyRejectDo: function () {
@@ -4872,6 +4879,228 @@ Object.assign(ACT, {
     if (!db.catalog[p.id]) addToCatalog(p);
     db.wishCards[p.id] = db.catalog[p.id];
     ACT.wishToggle({ dataset: { id: p.id } });
+  }
+});
+/* ---- Vista de cartas (lista / con imagen / galería) para compras a clientes ---- */
+function cardView() {
+  if (!ui.cardView) { try { ui.cardView = localStorage.getItem("nk_cardview") || "img"; } catch (e) { ui.cardView = "img"; } }
+  return ui.cardView;
+}
+function cardViewBar() {
+  var v = cardView(), b = function (id, l) { return '<button type="button" data-act="cardView" data-v="' + id + '" aria-pressed="' + (v === id) + '">' + l + "</button>"; };
+  return '<div class="row" style="gap:10px;align-items:center"><span class="muted" style="font-size:13px">Ver:</span><div class="seg" role="group" aria-label="Vista de cartas" style="max-width:420px">' + b("list", "Lista") + b("img", "Con imagen") + b("gal", "Galería") + "</div></div>";
+}
+function cvThumb(it) {
+  if (!it.img) return '<span style="display:inline-block;width:40px;height:56px;border-radius:4px;background:var(--line);flex:none" aria-hidden="true"></span>';
+  return '<button type="button" data-act="imgZoom" data-src="' + esc(it.img) + '" data-name="' + esc(it.name + " · " + it.set + " #" + it.num) + '" title="Ver en grande" style="padding:0;border:0;background:none;cursor:zoom-in;flex:none"><img src="' + esc(it.img) + '" alt="" loading="lazy" style="width:40px;height:56px;object-fit:cover;border-radius:4px;display:block"></button>';
+}
+function cvTile(it, inner) {
+  return '<div class="stack" style="gap:6px;' + (it.include === false || it.sel === false || it.removed ? "opacity:.45" : "") + '">' +
+    (it.img ? '<button type="button" data-act="imgZoom" data-src="' + esc(it.img) + '" data-name="' + esc(it.name + " · " + it.set + " #" + it.num) + '" style="padding:0;border:0;background:none;cursor:zoom-in"><img src="' + esc(it.img) + '" alt="' + esc(it.name) + '" loading="lazy" style="width:100%;border-radius:8px;display:block"></button>'
+      : '<div style="aspect-ratio:63/88;border-radius:8px;background:var(--line);display:grid;place-items:center;padding:8px;text-align:center;font-size:13px">' + esc(it.name) + "</div>") +
+    '<strong style="font-size:13px;line-height:1.25">' + esc(it.name) + '</strong><span class="mono muted" style="font-size:12px">' + esc(it.set + " #" + it.num) + (it.lang && it.lang !== "EN" ? " · " + esc(langName(it.lang)) : "") + "</span>" + inner + "</div>";
+}
+function cvGallery(its, edit) {
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:16px">' + its.map(function (it) {
+    return cvTile(it, '<label class="row" style="gap:6px;font-size:13px"><input type="checkbox" data-change="buyItem" data-id="' + it.id + '" data-k="include"' + (it.include ? " checked" : "") + (edit ? "" : " disabled") + ' style="width:18px;height:18px">Incluir</label>' +
+      '<span style="font-size:13px">' + esc(it.cond) + (it.foil ? " · Foil" : "") + " · ×" + it.qty + "</span>" +
+      '<span style="font-size:13px;font-weight:700">' + (it.kind === "bulk" ? "Bulk" : it.unit == null ? "Sin oferta" : money(it.unit) + " c/u") + "</span>");
+  }).join("") + "</div>";
+}
+
+/* ---- Por cargar al inventario: lo recibido de una solicitud, para revisarlo y darlo de alta ---- */
+function loadBuild(v) {
+  if (v.load) return v.load;
+  var its = (v.items || []).filter(function (i) { return i.include && Number(i.qty) > 0; }).map(function (i) {
+    return { id: uid("ld"), sfid: i.sfid, name: i.name, set: i.set, num: i.num, setName: i.setName, img: i.img, rar: i.rar || null, foil: !!i.foil, cond: i.cond || "NM", lang: i.lang || "EN", qty: Number(i.qty) || 0, price: null, sel: true, removed: false, bulk: i.kind === "bulk" };
+  });
+  v.load = { status: its.length ? "pendiente" : "cargada", bulkOn: true, items: its, runs: [] };
+  return v.load;
+}
+function loadLeft(v) { return v.load && v.load.status === "pendiente" ? v.load.items.filter(function (i) { return !i.removed; }) : []; }
+function loadQty(v) { return loadLeft(v).reduce(function (a, i) { return a + (Number(i.qty) || 0); }, 0); }
+function loadPendingQty(s) { return ventasOf(s).reduce(function (a, v) { return a + loadQty(v); }, 0); }
+function loadPill(v) {
+  if (v.status !== "completada") return '<span class="muted">—</span>';
+  if (!v.load) return '<span class="pill neu">Sin revisar</span>';
+  if (v.load.status === "pendiente") return '<span class="pill warn">Por cargar (' + loadQty(v) + ")</span>";
+  return '<span class="pill ok">Cargada</span>';
+}
+function loadPrint(sfid) {
+  if (db.catalog[sfid]) return db.catalog[sfid];
+  for (var k in db.catalog) { var p = db.catalog[k]; if (p && p.scryfallId === sfid) return p; }
+  return null;
+}
+function loadFinish(p, foil) {
+  var f = (p && p.finishes) || ["normal", "foil"];
+  if (foil) return f.indexOf("foil") >= 0 ? "foil" : f.indexOf("etched") >= 0 ? "etched" : f[0];
+  return f.indexOf("normal") >= 0 ? "normal" : f[0];
+}
+function loadHave(s, it) {
+  var p = loadPrint(it.sfid); if (!p) return 0;
+  var fin = loadFinish(p, it.foil);
+  return (db.inventory || []).filter(function (i) { return i.storeId === s.id && i.printId === p.id && i.finish === fin && i.cond === it.cond && i.lang === it.lang; }).reduce(function (a, i) { return a + (Number(i.qty) || 0); }, 0);
+}
+function loadAutoPrice(s, it) {
+  var p = loadPrint(it.sfid); if (!p) return null;
+  return unitPrice(s, { printId: p.id, finish: loadFinish(p, it.foil), cond: it.cond, lang: it.lang, price: null, fixed: false });
+}
+function loadGoing(v) { var L = v.load; return L.items.filter(function (i) { return !i.removed && i.sel && Number(i.qty) > 0 && (L.bulkOn || !i.bulk); }); }
+function loadStatusHTML(v) {
+  if (v.status !== "completada") return "";
+  if (!v.load) return '<div class="card row" style="justify-content:space-between;gap:12px;flex-wrap:wrap"><span>Esta solicitud se recibió antes de que existiera el paso «Por cargar al inventario».</span><button type="button" class="btn" data-act="loadInit" data-id="' + v.id + '">Pasar a por cargar al inventario</button></div>';
+  var L = v.load, runs = L.runs || [];
+  var hist = runs.map(function (r) { return "<li>" + fmtDay(r.at) + " · " + r.n + " cartas cargadas por " + esc(r.by || "") + (r.removed && r.removed.length ? " · quitadas: " + esc(r.removed.join(", ")) : "") + "</li>"; }).join("");
+  if (L.status === "pendiente") return '<div class="card stack" style="border-left:4px solid var(--warn,#d9a400)"><div class="row" style="justify-content:space-between;gap:12px;flex-wrap:wrap"><span><strong>Por cargar al inventario:</strong> ' + loadQty(v) + ' cartas pendientes.</span><button type="button" class="btn pri" data-act="loadGo" data-id="' + v.id + '">Revisar y cargar</button></div>' + (hist ? '<ul style="margin:0;padding-left:18px" class="muted">' + hist + "</ul>" : "") + "</div>";
+  return '<div class="card stack" style="border-left:4px solid var(--ok)"><span><span class="pill ok">Cargada al inventario</span></span>' + (hist ? '<ul style="margin:0;padding-left:18px">' + hist + "</ul>" : "") + "</div>";
+}
+function admLoad(s) {
+  var list = ventasOf(s).filter(function (v) { return v.status === "completada" && v.load && v.load.status === "pendiente"; }).sort(function (a, b) { return (a.receivedAt || 0) - (b.receivedAt || 0); });
+  var old = ventasOf(s).filter(function (v) { return v.status === "completada" && !v.load; }).length;
+  var intro = '<p class="muted" style="margin:0">Aquí quedan las cartas de las solicitudes que ya recibiste. Revisa lo que llegó físicamente: puedes cambiar versión, foil, estado, idioma o cantidad, quitar cartas o desmarcar las que no quieras cargar todavía. <strong>Estos cambios no modifican lo que ya se le pagó al cliente.</strong></p>' +
+    (old ? '<p class="muted" style="margin:0;font-size:13px">Tienes ' + old + ' solicitudes recibidas antes de este paso; ábrelas en «Solicitudes» si quieres pasarlas aquí.</p>' : "");
+  if (!list.length) return intro + '<div class="card"><p class="muted" style="margin:0;text-align:center;padding:16px">No hay cartas pendientes de cargar.</p></div>';
+  var open = ui.loadOpen && list.filter(function (v) { return v.id === ui.loadOpen; })[0] ? ui.loadOpen : list[0].id;
+  return intro + cardViewBar() + list.map(function (v) { return v.id === open ? loadCard(s, v) : loadCardShort(v); }).join("");
+}
+function loadCardShort(v) {
+  return '<div class="card row" style="justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2 style="font-size:18px;margin:0">' + esc(ventaNum(v)) + " · " + esc(v.buyer ? v.buyer.name : "") + '</h2><span class="muted" style="font-size:13px">Recibida el ' + fmtDay(v.receivedAt) + " · " + (v.mode === "pago" ? "pagada en efectivo" : "pagada en crédito") + " · " + loadQty(v) + ' cartas por cargar</span></div><button type="button" class="btn" data-act="loadOpen" data-id="' + v.id + '">Revisar y cargar</button></div>';
+}
+function loadCard(s, v) {
+  var L = v.load, view = cardView(), going = loadGoing(v), gq = going.reduce(function (a, i) { return a + i.qty; }, 0);
+  var bulkN = L.items.filter(function (i) { return i.bulk && !i.removed; }).reduce(function (a, i) { return a + i.qty; }, 0);
+  var sel = function (it, k, opts, lab) { return '<select class="dsel" data-change="loadItem" data-v="' + v.id + '" data-id="' + it.id + '" data-k="' + k + '"' + (it.removed ? " disabled" : "") + ">" + opts.map(function (o) { return '<option value="' + o + '"' + (it[k] === o ? " selected" : "") + ">" + (lab ? lab(o) : o) + "</option>"; }).join("") + "</select>"; };
+  var langs = Object.keys(LANG_NAME);
+  var body;
+  if (view === "gal") {
+    body = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:16px">' + L.items.map(function (it) {
+      var off = it.removed || !it.sel || (it.bulk && !L.bulkOn);
+      return cvTile({ img: it.img, name: it.name, set: it.set, num: it.num, lang: it.lang, sel: !off },
+        '<label class="row" style="gap:6px;font-size:13px"><input type="checkbox" data-change="loadItem" data-v="' + v.id + '" data-id="' + it.id + '" data-k="sel"' + (it.sel ? " checked" : "") + (it.removed ? " disabled" : "") + ' style="width:18px;height:18px">Cargar</label>' +
+        '<span style="font-size:13px">' + esc(it.cond) + (it.foil ? " · Foil" : "") + " · ×" + it.qty + (it.bulk ? ' · <span class="pill warn" style="font-size:11px">Bulk</span>' : "") + "</span>" +
+        (it.removed ? '<button type="button" class="btn sm" data-act="loadRemove" data-v="' + v.id + '" data-id="' + it.id + '">Regresar</button>' : '<span class="muted" style="font-size:12px">Para editar usa Lista o Con imagen</span>'));
+    }).join("") + "</div>";
+  } else {
+    var rows = L.items.map(function (it) {
+      var off = it.removed || !it.sel || (it.bulk && !L.bulkOn), have = loadHave(s, it), ap = loadAutoPrice(s, it);
+      return '<tr class="' + (off ? "muted" : "") + '"' + (it.removed ? ' style="text-decoration:line-through"' : "") + '><td><input type="checkbox" data-change="loadItem" data-v="' + v.id + '" data-id="' + it.id + '" data-k="sel"' + (it.sel ? " checked" : "") + (it.removed ? " disabled" : "") + ' style="width:18px;height:18px" aria-label="Cargar ' + esc(it.name) + '"></td>' +
+        '<td><div class="row" style="gap:8px;flex-wrap:nowrap">' + (view === "img" ? cvThumb(it) : "") + "<span><strong>" + esc(it.name) + "</strong>" + (it.bulk ? ' <span class="pill warn" style="font-size:11px">Bulk</span>' : "") + "</span></div></td>" +
+        '<td><span class="mono muted" style="font-size:12px">' + esc(it.set + " #" + it.num) + "</span><br>" + (it.removed ? "" : '<button type="button" class="btn sm" data-act="loadVersion" data-v="' + v.id + '" data-id="' + it.id + '">Cambiar versión</button>') + "</td>" +
+        '<td><input type="checkbox" data-change="loadItem" data-v="' + v.id + '" data-id="' + it.id + '" data-k="foil"' + (it.foil ? " checked" : "") + (it.removed ? " disabled" : "") + ' style="width:18px;height:18px" aria-label="Foil"></td>' +
+        "<td>" + sel(it, "cond", CONDS) + "</td><td>" + sel(it, "lang", langs, langName) + "</td>" +
+        '<td><input type="number" min="0" class="mono dsel" style="width:64px" value="' + it.qty + '" data-change="loadItem" data-v="' + v.id + '" data-id="' + it.id + '" data-k="qty"' + (it.removed ? " disabled" : "") + "></td>" +
+        '<td class="num">' + have + " → " + (off ? have : have + it.qty) + "</td>" +
+        '<td><input type="number" min="0" step="0.5" class="mono dsel" style="width:118px" value="' + (it.price == null ? "" : it.price) + '" placeholder="' + (ap == null ? "Automático" : money(ap)) + '" title="Vacío = precio automático" data-change="loadItem" data-v="' + v.id + '" data-id="' + it.id + '" data-k="price"' + (it.removed ? " disabled" : "") + "></td>" +
+        '<td><button type="button" class="btn sm" data-act="loadRemove" data-v="' + v.id + '" data-id="' + it.id + '">' + (it.removed ? "Regresar" : "Quitar") + "</button></td></tr>";
+    }).join("");
+    body = '<div class="tbl-box"><table class="tbl" style="min-width:1000px"><thead><tr><th></th><th>Carta</th><th>Versión</th><th>Foil</th><th>Estado</th><th>Idioma</th><th>Cant.</th><th class="num">En inventario<br>hoy → quedará</th><th>Precio en tienda</th><th></th></tr></thead><tbody>' + rows +
+      '</tbody><tfoot><tr style="border-top:2px solid var(--line)"><td colspan="6" style="text-align:right;font-weight:800">TOTAL A CARGAR</td><td class="num" style="font-weight:800">' + gq + '</td><td colspan="3"></td></tr></tfoot></table></div>';
+  }
+  return '<div class="card stack" style="border-left:4px solid var(--brand)"><div class="row" style="justify-content:space-between;gap:10px;flex-wrap:wrap"><div><h2 style="font-size:18px;margin:0">' + esc(ventaNum(v)) + " · " + esc(v.buyer ? v.buyer.name : "") + "</h2>" +
+    '<span class="muted" style="font-size:13px">Recibida el ' + fmtDay(v.receivedAt) + " · " + (v.mode === "pago" ? "pagada en efectivo" : "pagada en crédito") + " · " + loadQty(v) + " cartas por cargar</span></div>" +
+    '<div class="row" style="gap:8px"><button type="button" class="btn" data-act="buyOpen" data-id="' + v.id + '">Ver solicitud</button><button type="button" class="btn pri" data-act="loadAsk" data-v="' + v.id + '"' + (gq ? "" : " disabled") + ">Agregar " + gq + " cartas al inventario</button></div></div>" +
+    (bulkN ? '<label class="row" style="gap:8px"><input type="checkbox" data-change="loadBulk" data-v="' + v.id + '"' + (L.bulkOn ? " checked" : "") + ' style="width:18px;height:18px"> Incluir bulk (' + bulkN + " cartas)</label>" : "") +
+    '<p class="muted" style="margin:0;font-size:13px">Precio en tienda: vacío = automático (Card Kingdom + margen). Si escribes un precio, la carta queda con precio fijo.</p>' + body + "</div>";
+}
+function loadVenta(id) { return (db.ventas || []).filter(function (x) { return x.id === id; })[0]; }
+function loadFind(v, id) { return v && v.load && v.load.items.filter(function (i) { return i.id === id; })[0]; }
+function loadSummary(s, v) {
+  var going = loadGoing(v), add = 0, newN = 0, sumN = [], wish = 0, wl = {};
+  Object.keys(db.wishlists || {}).forEach(function (u) { ((db.wishlists[u] || {})[s.id] || []).forEach(function (id) { wl[id] = 1; }); });
+  going.forEach(function (it) { add += it.qty; if (loadHave(s, it) > 0) sumN.push(it.name); else newN++; var p = loadPrint(it.sfid); if (wl[it.sfid] || (p && wl[p.id])) wish++; });
+  var removed = v.load.items.filter(function (i) { return i.removed; }).map(function (i) { return i.name; });
+  var stay = v.load.items.filter(function (i) { return !i.removed && going.indexOf(i) < 0; });
+  return { going: going, add: add, newN: newN, sumN: sumN, wish: wish, removed: removed, stay: stay };
+}
+function loadModal(m) {
+  var s = curStore(), v = loadVenta(m.v); if (!v) return "";
+  if (m.type === "loadVersion") {
+    return '<div class="dlg plat"><button class="x" type="button" data-act="closeModal" aria-label="Cerrar">×</button><div class="stack"><h2 style="font-size:22px">Elige la versión correcta</h2>' +
+      (m.loading ? '<p class="muted">Buscando versiones…</p>' : '<div class="printgrid">' + (m.prints || []).map(function (p) { return '<button type="button" class="opt" data-act="loadVersionPick" data-id="' + esc(p.id) + '">' + cardImg(p) + '<strong style="font-size:13px">' + esc(p.set) + " · #" + esc(p.num) + '</strong><span class="muted" style="font-size:12px">' + esc(p.setName) + "</span></button>"; }).join("") + "</div>") + "</div></div>";
+  }
+  var S = loadSummary(s, v);
+  return '<div class="dlg plat sm"><button class="x" type="button" data-act="closeModal" aria-label="Cerrar">×</button><div class="stack"><h2 style="font-size:22px">Agregar al inventario · ' + esc(ventaNum(v)) + "</h2>" +
+    '<div class="confirmbox"><strong>Revisa antes de confirmar</strong><ul>' +
+    "<li>Se agregan <strong>" + S.add + " cartas</strong> en " + S.going.length + " renglones</li>" +
+    (S.sumN.length ? "<li><strong>" + S.sumN.length + "</strong> se suman a cartas que ya tienes (" + esc(S.sumN.slice(0, 6).join(", ")) + (S.sumN.length > 6 ? "…" : "") + ")</li>" : "") +
+    (S.newN ? "<li><strong>" + S.newN + "</strong> son nuevas en tu inventario</li>" : "") +
+    (S.removed.length ? "<li>Quitaste <strong>" + S.removed.length + "</strong>: " + esc(S.removed.join(", ")) + "</li>" : "") +
+    (S.stay.length ? "<li><strong>" + S.stay.length + "</strong> renglones se quedan pendientes para después</li>" : "") +
+    (S.wish ? "<li><strong>" + S.wish + "</strong> están en la wishlist de tus clientes y quedarán disponibles</li>" : "") +
+    "</ul></div>" + (m.busy ? '<p class="muted" style="margin:0">Consultando datos de las cartas…</p>' : "") +
+    '<div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeModal">Volver</button><button type="button" class="btn pri" data-act="loadDo"' + (m.busy ? " disabled" : "") + ">Sí, agregar al inventario</button></div></div></div>";
+}
+function loadImgModal(m) {
+  return '<div class="dlg plat sm" style="max-width:420px"><button class="x" type="button" data-act="closeModal" aria-label="Cerrar">×</button><div class="stack"><img src="' + esc(m.src) + '" alt="' + esc(m.name) + '" style="width:100%;border-radius:12px"><p class="muted" style="margin:0;text-align:center">' + esc(m.name) + "</p></div></div>";
+}
+var _ldExtra = extraModal;
+extraModal = function (m) {
+  if (m.type === "loadAsk" || m.type === "loadVersion") return loadModal(m);
+  if (m.type === "imgZoom") return loadImgModal(m);
+  return _ldExtra(m);
+};
+/* Trae de Scryfall las cartas que aún no están en el catálogo de la tienda. */
+function loadFetchPrints(ids) {
+  var miss = ids.filter(function (id) { return !loadPrint(id); }), chunks = [];
+  for (var i = 0; i < miss.length; i += 75) chunks.push(miss.slice(i, i + 75));
+  return chunks.reduce(function (pr, ch) {
+    return pr.then(function () {
+      return sfFetch("https://api.scryfall.com/cards/collection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ identifiers: ch.map(function (id) { return { id: id }; }) }) })
+        .then(function (res) { (res.data || []).forEach(function (c) { addToCatalog(fromScryfall(c)); }); });
+    });
+  }, Promise.resolve()).then(function () { return ids.filter(function (id) { return !loadPrint(id); }); });
+}
+Object.assign(ACT, {
+  cardView: function (el) { ui.cardView = el.dataset.v; try { localStorage.setItem("nk_cardview", ui.cardView); } catch (e) {} render(); },
+  imgZoom: function (el) { openModal({ type: "imgZoom", src: el.dataset.src, name: el.dataset.name }); },
+  loadInit: function (el) { var v = loadVenta(el.dataset.id); if (!v) return; loadBuild(v); buyLog(v, "Pasó las cartas a «Por cargar al inventario»"); saveDB(); ui.buyTab = "carga"; ui.loadOpen = v.id; ui.buyId = null; render(); },
+  loadGo: function (el) { ui.buyTab = "carga"; ui.loadOpen = el.dataset.id; ui.buyId = null; render(); },
+  loadOpen: function (el) { ui.loadOpen = el.dataset.id; render(); },
+  loadRemove: function (el) { var v = loadVenta(el.dataset.v), it = loadFind(v, el.dataset.id); if (!it) return; it.removed = !it.removed; saveDB(); render(); },
+  loadVersion: function (el) {
+    var v = loadVenta(el.dataset.v), it = loadFind(v, el.dataset.id); if (!it) return;
+    openModal({ type: "loadVersion", v: v.id, id: it.id, loading: true, prints: [] });
+    scryfallPrints(it.name).then(function (ps) { if (ui.modal && ui.modal.type === "loadVersion") { ui.modal.prints = ps; ui.modal.loading = false; renderModal(); } }).catch(function () { if (ui.modal) { ui.modal.loading = false; renderModal(); } });
+  },
+  loadVersionPick: function (el) {
+    var m = ui.modal, v = loadVenta(m.v), it = loadFind(v, m.id), p = (m.prints || []).filter(function (x) { return x.id === el.dataset.id; })[0]; if (!it || !p) return;
+    addToCatalog(p);
+    it.sfid = p.id; it.set = p.set; it.num = p.num; it.setName = p.setName; it.img = p.img; it.rar = p.rarity || it.rar;
+    buyLog(v, "Por cargar: cambió la versión de «" + it.name + "» a " + p.set + " #" + p.num);
+    ui.modal = null; saveDB(); render();
+  },
+  loadAsk: function (el) { openModal({ type: "loadAsk", v: el.dataset.v }); },
+  loadDo: function () {
+    var m = ui.modal, s = curStore(), v = loadVenta(m.v); if (!v || m.busy) return;
+    var going = loadGoing(v); if (!going.length) return;
+    m.busy = true; renderModal();
+    loadFetchPrints(going.map(function (i) { return i.sfid; })).then(function (missing) {
+      if (missing.length) { m.busy = false; renderModal(); toast("No se pudieron consultar " + missing.length + " cartas en Scryfall. Revisa tu conexión e inténtalo otra vez."); return; }
+      var now = Date.now(), n = 0;
+      going.forEach(function (it) {
+        var p = loadPrint(it.sfid), price = it.price == null || it.price === "" ? null : Number(it.price);
+        addInventory(s, p.id, loadFinish(p, it.foil), it.cond, it.lang, it.qty, price, now); n += it.qty;
+      });
+      var removed = v.load.items.filter(function (i) { return i.removed; }).map(function (i) { return i.name; });
+      v.load.items = v.load.items.filter(function (i) { return !i.removed && going.indexOf(i) < 0; });
+      v.load.runs = (v.load.runs || []).concat([{ at: now, n: n, by: tabAuditUser(), removed: removed }]);
+      if (!v.load.items.length) v.load.status = "cargada";
+      buyLog(v, "Cargó " + n + " cartas al inventario" + (removed.length ? " · quitó: " + removed.join(", ") : "") + (v.load.items.length ? " · quedan " + loadQty(v) + " por cargar" : ""));
+      auditLog(s.id, "Compras a clientes", "Cargó al inventario " + n + " cartas de la solicitud " + ventaNum(v), tabAuditUser());
+      ui.modal = null; saveDB(); render(); toast(n + " cartas agregadas al inventario");
+    }).catch(function () { m.busy = false; renderModal(); toast("No se pudo consultar Scryfall. Revisa tu conexión e inténtalo otra vez."); });
+  }
+});
+Object.assign(CHANGE, {
+  loadBulk: function (el) { var v = loadVenta(el.dataset.v); if (!v || !v.load) return; v.load.bulkOn = el.checked; saveDB(); render(); },
+  loadItem: function (el) {
+    var v = loadVenta(el.dataset.v), it = loadFind(v, el.dataset.id); if (!it) return;
+    var k = el.dataset.k;
+    if (k === "sel" || k === "foil") it[k] = el.checked;
+    else if (k === "qty") it.qty = Math.max(0, parseInt(el.value, 10) || 0);
+    else if (k === "price") it.price = el.value === "" ? null : r2(Math.max(0, Number(el.value) || 0));
+    else it[k] = el.value;
+    saveDB(); setTimeout(render, 0);
   }
 });
 window.addEventListener("hashchange", function () { applyRoute(); });
