@@ -1295,7 +1295,7 @@ function storeHome(s) {
     if (sec.id === "banner") {
       out += carouselHTML(s);
     } else if (sec.id === "restock") {
-      var rec = groupedInventory(s).sort(function (a, b) { return b.addedAt - a.addedAt; }).slice(0, 8);
+      var rec = groupedInventory(s).sort(function (a, b) { return (b.addedAt || 0) - (a.addedAt || 0) || String(a.p.id).localeCompare(String(b.p.id)); }).slice(0, 8);
       out += '<section class="stack" style="gap:16px"><div class="row" style="justify-content:space-between;align-items:baseline"><h2>Restock reciente</h2><button type="button" class="sbtn sm" data-act="storeTab" data-tab="catalog">Ver todo</button></div>' + cardsHTML(s, rec) + "</section>";
     } else if (sec.id === "best") {
       var best = bestSellers(s);
@@ -1343,7 +1343,7 @@ function filteredGroups(s) {
     if (f.foil && !g.foil) return false;
     return true;
   });
-  var by = { recent: function (a, b) { return b.addedAt - a.addedAt; }, name: function (a, b) { return a.p.name.localeCompare(b.p.name); },
+  var by = { recent: function (a, b) { return (b.addedAt || 0) - (a.addedAt || 0) || String(a.p.id).localeCompare(String(b.p.id)); }, name: function (a, b) { return a.p.name.localeCompare(b.p.name); },
     asc: function (a, b) { return (a.min || 0) - (b.min || 0); }, desc: function (a, b) { return (b.min || 0) - (a.min || 0); } };
   var cmp = by[f.sort] || by.recent;
   return gs.sort(function (a, b) { return (a.out - b.out) || cmp(a, b); });
@@ -5083,6 +5083,18 @@ _saveDBraw = function () {
   clearTimeout(FB.timer); FB.timer = setTimeout(fbFlush, 350);
   return true;
 };
+/* Freno: si el panel guarda solo (sin que nadie toque nada) muchas veces seguidas, se detiene y avisa.
+   Así dos pestañas o dos personas con el panel abierto no se quedan "peleando" los datos. */
+FB.tabId = Math.random().toString(36).slice(2, 8); FB.autoW = []; FB.lastInput = 0;
+["click", "keydown", "change", "input", "submit", "drop"].forEach(function (ev) { document.addEventListener(ev, function () { FB.lastInput = Date.now(); }, true); });
+function fbAutoGuard() {
+  var now = Date.now(); if (now - FB.lastInput < 8000) return true;
+  FB.autoW = FB.autoW.filter(function (t) { return now - t < 60000; }); FB.autoW.push(now);
+  if (FB.autoW.length <= 5) return true;
+  FB.readonly = true;
+  fbGate("loop");
+  return false;
+}
 function fbFlush() {
   if (!fdb || !FB.user || FB.readonly) return;
   var r = fbRefs(), now = Date.now();
@@ -5107,8 +5119,9 @@ function fbFlush() {
           return r.img.doc(id).set({ data: FB.imgs[id], at: now }).then(function () { known[id] = 1; });
         });
         var changed = parts.filter(function (x) { return FB.lastPart[x.id] !== x.h; });
+        if (!fbAutoGuard()) return;
         Promise.all(ups).then(function () {
-          var mainDoc = { json: pj, parts: parts.map(function (x) { return { id: x.id, h: x.h }; }), at: now, v: FB_BUILD, minClient: FB_BUILD };
+          var mainDoc = { json: pj, parts: parts.map(function (x) { return { id: x.id, h: x.h }; }), at: now, v: FB_BUILD, minClient: FB_BUILD, by: (FB.user && FB.user.email) || "", tab: FB.tabId, auto: Date.now() - FB.lastInput >= 8000 };
           var allSize = changed.reduce(function (a, x) { return a + x.json.length; }, pj.length);
           if (allSize < 8000000) {
             /* Todo en un solo guardado: las partes y el documento principal cambian juntos o no cambian. */
@@ -5170,6 +5183,7 @@ function fbGate(state, msg) {
   if (state === "checking") h = fbLogoHTML() + '<h2>Panel de ' + name + '</h2><div class="fb-spin" aria-label="Cargando"></div><p>Verificando tu acceso…</p>';
   else if (state === "login") h = fbLogoHTML() + '<h2>Panel de ' + name + '</h2><p>Entra con la cuenta de Google autorizada para administrar la tienda.</p><button type="button" class="fb-btn g" id="fb-g">' + G_ICON + 'Entrar con Google</button>';
   else if (state === "outdated") h = fbLogoHTML() + '<h2>Hay una versión nueva del panel</h2><p>Recarga la página para seguir trabajando. Esta pestaña ya no guarda cambios para no sobrescribir los datos de la tienda.</p><button type="button" class="fb-btn" id="fb-reload">Recargar</button>';
+  else if (state === "loop") h = fbLogoHTML() + '<h2>Se detuvo el guardado automático</h2><p>Este panel estaba guardando una y otra vez sin que nadie hiciera cambios. Casi siempre pasa cuando el panel está abierto en <strong>otra pestaña, otra computadora o el celular</strong> al mismo tiempo.</p><p>Cierra el panel en los demás lugares y recarga esta página. Tus datos están a salvo.</p><button type="button" class="fb-btn" id="fb-reload">Recargar</button>';
   else if (state === "denied") h = fbLogoHTML() + '<h2>No tienes acceso</h2><p>La cuenta <strong>' + esc(FB.user ? FB.user.email : "") + '</strong> no está autorizada para este panel. Pide al dueño de la tienda que la agregue.</p><button type="button" class="fb-btn g" id="fb-other">' + G_ICON + 'Usar otra cuenta</button>';
   else h = fbLogoHTML() + '<h2>No pudimos conectar</h2><p>' + esc(msg || "Revisa tu conexión a internet y recarga la página.") + '</p><button type="button" class="fb-btn" id="fb-reload">Recargar</button>';
   el.innerHTML = '<div class="fb-card" role="dialog" aria-modal="true">' + h + "</div>";
